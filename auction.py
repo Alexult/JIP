@@ -1,4 +1,5 @@
 import random
+from typing import override, final
 import matplotlib.pyplot as plt
 
 Bid = tuple[float, float, int]  # (price, quantity, agent_id)
@@ -19,16 +20,16 @@ class BaseProsumerAgent:
         flexible_load_max: float,
         generation_capacity: float,
     ):
-        self.agent_id = agent_id
-        self.fixed_load = fixed_load
-        self.flexible_load_max = flexible_load_max
-        self.generation_capacity = generation_capacity
-        self.current_flexible_load = 0.0
-        self.net_demand = 0.0
-        self.bid_history = []
-        self.offer_history = []
-        self.net_demand_history = []
-        self.profit_history = []
+        self.agent_id: int = agent_id
+        self.fixed_load: float = fixed_load
+        self.flexible_load_max: float = flexible_load_max
+        self.generation_capacity: float = generation_capacity
+        self.current_flexible_load: float = 0.0
+        self.net_demand: float = 0.0
+        self.bid_history: list[Bid | None] = []
+        self.offer_history: list[Offer | None] = []
+        self.net_demand_history: list[float] = []
+        self.profit_history: list[float] = []
 
     def update_state(self):
         """
@@ -100,6 +101,7 @@ class AggroBuyDude(BaseProsumerAgent):
     An agent that is aggressive in its buying strategy, always bidding a high price.
     """
 
+    @override
     def devise_strategy(self) -> tuple[list[Bid], list[Offer]]:
         bids: list[Bid] = []
         offers: list[Offer] = []
@@ -120,6 +122,7 @@ class SelfishSellerDude(BaseProsumerAgent):
     An agent that is conservative and only sells at a high price.
     """
 
+    @override
     def devise_strategy(self) -> tuple[list[Bid], list[Offer]]:
         bids: list[Bid] = []
         offers: list[Offer] = []
@@ -136,7 +139,7 @@ class SelfishSellerDude(BaseProsumerAgent):
 
 
 # TODO: Use the damn priority queue and make an orderbook then you can use
-# multithreaded parallel agent => multi agent game theory, 
+# multithreaded parallel agent => multi agent game theory,
 # also can do price discovery tactic for clearing price
 class DoubleAuctionMarket:
     """
@@ -144,7 +147,7 @@ class DoubleAuctionMarket:
     """
 
     def __init__(self, agents: list[BaseProsumerAgent]):
-        self.agents = agents
+        self.agents: list[BaseProsumerAgent] = agents
 
     def run_timestep(self) -> tuple[float, float, list[Trade]]:
         """
@@ -232,6 +235,7 @@ class DoubleAuctionMarket:
         return trades, total_traded_quantity
 
 
+@final
 class MarketSimulation:
     """
     Manages the overall market simulation, including data logging and visualization.
@@ -239,12 +243,12 @@ class MarketSimulation:
 
     def __init__(self, agents: list[BaseProsumerAgent], num_timesteps: int):
         self.agents = agents
-        self.num_timesteps = num_timesteps
+        self.num_timesteps: int = num_timesteps
         self.market = DoubleAuctionMarket(self.agents)
-        self.clearing_prices = []
-        self.clearing_quantities = []
-        self.all_bids_history = []
-        self.all_offers_history = []
+        self.clearing_prices: list[float] = []
+        self.clearing_quantities: list[float] = []
+        self.all_bids_history: list[Bid] = []
+        self.all_offers_history: list[Offer] = []
 
     def run_simulation(self):
         """Runs the market simulation for the specified number of timesteps."""
