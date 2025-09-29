@@ -20,7 +20,7 @@
           venvDir = ".venv";
           # postShellHook = ''pip install -r requirements.txt'';
           strictDeps = false;
-          packages = with pkgs.python312Packages; [pandas matplotlib numpy ruff];
+          packages = with pkgs.python313Packages; [pandas matplotlib numpy ruff graph-tool];
         };
       };
     };
