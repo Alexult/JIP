@@ -1,0 +1,6 @@
+Nodes:
+[(Transformer; 3), Feeder1, Feeder2, Feeder3, 2, 3 ,4, 1]
+
+Edges:
+[(Transformer;Feeder1;-1),(Transformer;Feeder2;-1),(Transformer;Feeder3;-1),(Feeder1;2;2),(2;3;1),(Feeder2;4;2),(Feeder3;1;2)]
+
