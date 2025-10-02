@@ -20,7 +20,7 @@
           venvDir = ".venv";
           # postShellHook = ''pip install -r requirements.txt'';
           strictDeps = false;
-          packages = with pkgs.python313Packages; [pandas matplotlib numpy ruff networkx gymnasium];
+          packages = with pkgs.python313Packages; [pandas matplotlib numpy ruff networkx gymnasium loguru];
         };
       };
     };
