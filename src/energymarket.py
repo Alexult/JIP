@@ -375,7 +375,6 @@ class DoubleAuctionEnv(Env):
             "clearing_quantity": clearing_quantity,
         }
 
-        # The new MARL return format
         return observation, reward, terminated, truncated, info
 
     def render(self, mode="human"):
