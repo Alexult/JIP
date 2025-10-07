@@ -5,27 +5,29 @@ if __name__ == "__main__":
     AGENT_CONFIGS = [
         {
             "class": "AggressiveSellerAgent",
-            "fixed_load": 35,
+            "fixed_load": 10,
             "flexible_load_max": 8,
-            "generation_capacity": 20,
+            "generation_capacity": 40,
         },
         {
             "class": "AggressiveBuyerAgent",
             "fixed_load": 18,
             "flexible_load_max": 7,
-            "generation_capacity": 10,
+            "generation_capacity": 5,
         },
         {
             "class": "ProsumerAgent",
             "fixed_load": 12,
             "flexible_load_max": 6,
-            "generation_capacity": 22,
+            "generation_capacity": 30,
+            "generation_type": "wind",
         },
         {
             "class": "ProsumerAgent",
             "fixed_load": 34,
             "flexible_load_max": 9,
             "generation_capacity": 18,
+            "generation_type": "wind",
         },
         {
             "class": "ProsumerAgent",
@@ -34,7 +36,7 @@ if __name__ == "__main__":
             "generation_capacity": 11,
         },
     ]
-    MAX_STEPS = 50
+    MAX_STEPS = 24 * 10
 
     env = DoubleAuctionEnv(
         agent_configs=AGENT_CONFIGS,
@@ -72,4 +74,5 @@ if __name__ == "__main__":
     print(f"Total Cumulative Profit (All Agents): {total_reward:.2f}")
 
     env.plot_results()
-    env.plot_bid_ask_curves(num_plots=50)
+    env.plot_bid_ask_curves(num_plots=5)
+    env.plot_price_change_for_single_day(day=0)  # Plot prices for the first day
