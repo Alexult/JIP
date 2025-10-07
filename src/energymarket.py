@@ -378,6 +378,8 @@ class DoubleAuctionEnv(Env):
                 f"T={self.current_timestep:02d} | Price={self.last_clearing_price:.2f} | Qty={self.clearing_quantities[-1]:.2f} | Rewards={last_total_reward:.2f}"
             )
 
+    # The plotting functions (plot_results, plot_bid_ask_curves, etc.) remain the same
+    # and do not need to be modified for this change.
     def get_agent_color(self, agent_id: int) -> str:
         """Returns a color based on the agent's class name."""
         agent_class_name = type(self.agents[agent_id]).__name__

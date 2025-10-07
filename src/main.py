@@ -75,4 +75,4 @@ if __name__ == "__main__":
 
     env.plot_results()
     env.plot_bid_ask_curves(num_plots=5)
-    env.plot_price_change_for_single_day(day=0)
+    env.plot_price_change_for_single_day(day=0)  # Plot prices for the first day
