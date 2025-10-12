@@ -147,9 +147,9 @@ class ProsumerAgent:
             price_noise = 1 + (random.uniform(-0.1, 0.1) * (h / FORECAST_HORIZON))
 
             if net_demand > 0:  # Buyer
-                price = (last_price * 1.05 + 0.1) * price_noise
-            elif net_demand < 0:  # Seller
                 price = (last_price * 0.95 - 0.1) * price_noise
+            elif net_demand < 0:  # Seller
+                price = (last_price * 1.05 + 0.1) * price_noise
             else:
                 price, quantity = 0.0, 0.0
 
@@ -171,7 +171,7 @@ class AggressiveSellerAgent(ProsumerAgent):
         )
 
         if net_demand > 0:  # Buyer (use base logic)
-            price = last_price * 1.05 + 0.1
+            price = last_price * 0.95 - 0.1
         elif net_demand < 0:  # Seller (Aggressive)
             price = 0.01  # Offer at absolute minimum
         else:
