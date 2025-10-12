@@ -111,6 +111,9 @@ class ProsumerAgent:
             elif self.net_demand < 0 and price_submitted <= clearing_price:
                 profit = (clearing_price - price_submitted) * qty_submitted
         self.profit = profit
+        # TODO: handle case where you were not cleared in the auction,
+        # i.e your submitted bid is lower than clearing price or
+        # your ask was more than clearing price.
         return profit
 
     def devise_strategy(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
@@ -137,9 +140,9 @@ class ProsumerAgent:
             price_noise = 1 + (random.uniform(-0.1, 0.1) * (h / FORECAST_HORIZON))
 
             if net_demand > 0:  # Buyer
-                price = (last_price * 1.05 + 0.1) * price_noise
-            elif net_demand < 0:  # Seller
                 price = (last_price * 0.95 - 0.1) * price_noise
+            elif net_demand < 0:  # Seller
+                price = (last_price * 1.05 + 0.1) * price_noise
             else:
                 price, quantity = 0.0, 0.0
 
@@ -161,7 +164,7 @@ class AggressiveSellerAgent(ProsumerAgent):
         )
 
         if net_demand > 0:  # Buyer (use base logic)
-            price = last_price * 1.05 + 0.1
+            price = last_price * 0.95 - 0.1
         elif net_demand < 0:  # Seller (Aggressive)
             price = 0.01  # Offer at absolute minimum
         else:

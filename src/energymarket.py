@@ -33,15 +33,6 @@ class MarketClearingAgent(ABC):
         pass
 
 
-class CentralMarket(BaseMarket):
-    """
-    Manages the double auction process for the energy market.
-    """
-
-    def __init__(self):
-        super().__init__()
-
-
 class DoubleAuctionClearingAgent(MarketClearingAgent):
     """
     A market agent responsible for collecting bids and offers and clearing the market.
@@ -201,8 +192,8 @@ class DoubleAuctionEnv(Env):
         )
 
         # History logging
-        self.clearing_prices = []
-        self.clearing_quantities = []
+        self.clearing_prices: list[float] = []
+        self.clearing_quantities: list[float] = []
         self.profit_history = []
         self.net_demand_history = []
         self.action_history = []
@@ -355,7 +346,7 @@ class DoubleAuctionEnv(Env):
         for agent in self.agents:
             agent.calculate_net_demand(self.current_timestep)
 
-        # 6. Check Termination and Get Next Observation
+        # Check Termination and Get Next Observation
         is_truncated = self.current_timestep >= self.max_timesteps
         terminated = {i: False for i in self.agent_ids}
         truncated = {i: is_truncated for i in self.agent_ids}
@@ -387,8 +378,6 @@ class DoubleAuctionEnv(Env):
                 f"T={self.current_timestep:02d} | Price={self.last_clearing_price:.2f} | Qty={self.clearing_quantities[-1]:.2f} | Rewards={last_total_reward:.2f}"
             )
 
-    # The plotting functions (plot_results, plot_bid_ask_curves, etc.) remain the same
-    # and do not need to be modified for this change.
     def get_agent_color(self, agent_id: int) -> str:
         """Returns a color based on the agent's class name."""
         agent_class_name = type(self.agents[agent_id]).__name__
@@ -468,7 +457,6 @@ class DoubleAuctionEnv(Env):
         plt.legend()
         plt.tight_layout()
 
-        # Only call show once to display both Plot 1 and Plot 2 figures simultaneously
         plt.show()
 
     def plot_bid_ask_curves(self, num_plots=10):
