@@ -33,15 +33,6 @@ class MarketClearingAgent(ABC):
         pass
 
 
-class CentralMarket(BaseMarket):
-    """
-    Manages the double auction process for the energy market.
-    """
-
-    def __init__(self):
-        super().__init__()
-
-
 class DoubleAuctionClearingAgent(MarketClearingAgent):
     """
     A market agent responsible for collecting bids and offers and clearing the market.
@@ -80,7 +71,6 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         bids_sorted = bids_array[bids_array[:, 1].argsort()[::-1]]
         # Offers (Supply) sorted ascending by price (lowest price first)
         offers_sorted = offers_array[offers_array[:, 1].argsort()]
-        logger.debug(f"bids: {bids_sorted}, asks:{offers_sorted}")
 
         # Extract prices and quantities
         bid_prices = bids_sorted[:, 1]
@@ -89,35 +79,18 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         offer_quantities = offers_sorted[:, 2]
 
         # Find the Marginal Match Index (k)
-        # We only need to compare up to the length of the shorter list
         min_len = min(len(bid_prices), len(offer_prices))
-
-        # Find indices where Bid Price >= Offer Price. These orders are profitable to match.
         match_indices = np.where(bid_prices[:min_len] >= offer_prices[:min_len])[0]
 
         if len(match_indices) == 0:
-            # Market does not clear (highest bid < lowest offer)
             return 0.0, 0.0
 
-        # k is the index of the marginal order that defines the clearing price
-        # This order is the one corresponding to the largest index where a match occurs.
         k = match_indices[-1]
-
-        # Determine Clearing Price and Quantity
-        # Marginal Bid/Offer Prices define the clearing price range
         marginal_bid_price = bid_prices[k]
         marginal_offer_price = offer_prices[k]
-
-        # Clearing price is set as the midpoint of the marginal bid and offer
         clearing_price = (marginal_bid_price + marginal_offer_price) / 2.0
-
-        # The clearing quantity is the total quantity traded up to the marginal index k
-        # Calculate cumulative quantities for accepted orders (indices 0 to k, inclusive)
         bid_cumsum = np.cumsum(bid_quantities[: k + 1])
         offer_cumsum = np.cumsum(offer_quantities[: k + 1])
-
-        # The clearing quantity is the minimum of the total demand or supply at the marginal price.
-        # This is the last value in the cumulative sums.
         clearing_quantity = min(bid_cumsum[-1], offer_cumsum[-1])
 
         return clearing_price, clearing_quantity
@@ -126,7 +99,8 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
 class DoubleAuctionEnv(Env):
     """
     Gymnasium-compatible environment for a Double Auction Energy Market Simulation.
-    for a Multi-Agent RL (MARL) setup where each ProsumerAgent is a separate agent.
+    Agents submit bids for a 24-hour horizon. The environment clears the current
+    hour and provides a price forecast for the next 23 hours.
     """
 
     metadata = {"render_modes": ["human"], "render_fps": 30}
@@ -145,85 +119,123 @@ class DoubleAuctionEnv(Env):
         self.agent_ids = list(range(self.n_agents))
         self.max_timesteps = max_timesteps
         self.current_timestep = 0
+        self.FORECAST_HORIZON = 24
 
         # Public Market Stats for Observation (P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1)
-        self.last_clearing_price = 5.0  # Historical Price P_t-1
-        self.last_clearing_quantity = 0.0  # Historical Quantity Q_t-1
+        self.last_clearing_price = 5.0
+        self.last_clearing_quantity = 0.0
         self.last_total_bids_qty = 0.0
         self.last_total_offers_qty = 0.0
+
         self.AGENT_CLASS_MAP = {
             "ProsumerAgent": ProsumerAgent,
             "AggressiveSellerAgent": AggressiveSellerAgent,
             "AggressiveBuyerAgent": AggressiveBuyerAgent,
         }
         for i, config in enumerate(agent_configs):
-            # Default to ProsumerAgent if 'class' key is missing or invalid
             agent_class_name = config.get("class", "ProsumerAgent")
             AgentClass = self.AGENT_CLASS_MAP.get(agent_class_name, ProsumerAgent)
-
-            # Instantiate the correct agent class
             self.agents.append(
                 AgentClass(
                     agent_id=i,
                     fixed_load=config["fixed_load"],
                     flexible_load_max=config["flexible_load_max"],
                     generation_capacity=config["generation_capacity"],
+                    generation_type=config["generation_type"]
+                    if "generation_type" in config
+                    and config["generation_type"] is not None
+                    else "solar",
                 )
             )
 
         # --- Define Action Space (Per Agent) ---
-        # Action: [Price, Quantity] (2 size)
+        # Action: Array of [Price, Quantity] for the next 24 hours
         MAX_PRICE = 10.0
         MAX_QTY = 50.0
 
         low_action = np.array([0.0, 0.0], dtype=np.float32)
         high_action = np.array([MAX_PRICE, MAX_QTY], dtype=np.float32)
 
-        # NOTE: The action space is now for a SINGLE agent.
         self.action_space = Box(
-            low=low_action, high=high_action, shape=(2,), dtype=np.float32
-        )
-
-        # --- Define Observation Space (Per Agent) ---
-        # Observation: [ND_i, P_t-1 (previous clearing price), Q_t-1 (previous capacity), Sum_Bids_t-1, Sum_Offers_t-1] (5 features)
-
-        # Calculate bounds for Net Demand (ND)
-        MAX_DEMAND_ABS = max(
-            config["fixed_load"] + config["flexible_load_max"]
-            for config in agent_configs
-        )
-        MAX_CAPACITY = max(config["generation_capacity"] for config in agent_configs)
-        MAX_NET_DEMAND = MAX_DEMAND_ABS
-        MIN_NET_DEMAND = -MAX_CAPACITY
-
-        # Calculate bounds for Market Stats
-        MAX_SUM_QTY = self.n_agents * MAX_QTY
-
-        # Observation features: ND_i, P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1
-        low_obs = [MIN_NET_DEMAND, 0.0, 0.0, 0.0, 0.0]
-        high_obs = [MAX_NET_DEMAND, MAX_PRICE, MAX_QTY, MAX_SUM_QTY, MAX_SUM_QTY]
-
-        # NOTE: The observation space is now for a SINGLE agent.
-        self.observation_space = Box(
-            low=np.array(low_obs, dtype=np.float32),
-            high=np.array(high_obs, dtype=np.float32),
-            shape=(5,),
+            low=np.tile(low_action, (self.FORECAST_HORIZON, 1)),
+            high=np.tile(high_action, (self.FORECAST_HORIZON, 1)),
+            shape=(self.FORECAST_HORIZON, 2),
             dtype=np.float32,
         )
 
-        # History logging for plotting outside the RL loop
-        self.clearing_prices = []
-        self.clearing_quantities = []
+        # --- Define Observation Space (Per Agent) ---
+        # Obs: [ND_i] + [Market_Stats (4)] + [Price_Forecast (23)]
+        MAX_DEMAND_ABS = max(
+            c["fixed_load"] + c["flexible_load_max"] for c in agent_configs
+        )
+        MAX_CAPACITY = max(c["generation_capacity"] for c in agent_configs)
+        MAX_NET_DEMAND = MAX_DEMAND_ABS
+        MIN_NET_DEMAND = -MAX_CAPACITY
+        MAX_SUM_QTY = self.n_agents * MAX_QTY
+
+        # Features: ND_i, P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1
+        low_obs_base = [MIN_NET_DEMAND, 0.0, 0.0, 0.0, 0.0]
+        high_obs_base = [MAX_NET_DEMAND, MAX_PRICE, MAX_QTY, MAX_SUM_QTY, MAX_SUM_QTY]
+
+        # Add forecast prices to observation space
+        low_obs_forecast = [0.0] * (self.FORECAST_HORIZON - 1)
+        high_obs_forecast = [MAX_PRICE] * (self.FORECAST_HORIZON - 1)
+
+        low_obs = low_obs_base + low_obs_forecast
+        high_obs = high_obs_base + high_obs_forecast
+
+        self.observation_space = Box(
+            low=np.array(low_obs, dtype=np.float32),
+            high=np.array(high_obs, dtype=np.float32),
+            shape=(len(low_obs),),
+            dtype=np.float32,
+        )
+
+        # History logging
+        self.clearing_prices: list[float] = []
+        self.clearing_quantities: list[float] = []
         self.profit_history = []
         self.net_demand_history = []
         self.action_history = []
-        self.market_orders_history = []  # History of raw bids/offers for plotting
+        self.market_orders_history = []
 
-    def _get_obs(self) -> dict[int, np.ndarray]:
+    def _forecast_prices(self, actions: dict[int, np.ndarray]) -> list[float]:
         """
-        Compiles the current observation vector for each agent.
-        Returns a dictionary mapping agent ID to its 5-feature observation array.
+        Simulates market clearing for future timesteps (t+1 to t+23) based on
+        submitted actions to generate a price forecast.
+
+        NOTE: This forecast uses the agents' *current* net_demand to interpret
+        their future bids/offers. It does not simulate changes in their demand.
         """
+        forecasted_prices = []
+        for h in range(1, self.FORECAST_HORIZON):  # Iterate from hour t+1 to t+23
+            future_bids, future_offers = [], []
+            for agent in self.agents:
+                agent_id = agent.agent_id
+                if agent_id in actions:
+                    # Get the planned action for future hour 'h'
+                    price, quantity = actions[agent_id][h]
+                    # Use the agent's CURRENT net_demand to determine if it's a bid or offer
+                    bids, offers = agent.get_market_submission(price, quantity)
+                    if bids:
+                        future_bids.extend(bids)
+                    if offers:
+                        future_offers.extend(offers)
+
+            bids_arr = (
+                np.array(future_bids, dtype=float) if future_bids else np.array([])
+            )
+            offers_arr = (
+                np.array(future_offers, dtype=float) if future_offers else np.array([])
+            )
+
+            price, _ = self.market_agent.clear_market(bids_arr, offers_arr)
+            forecasted_prices.append(price)
+
+        return forecasted_prices
+
+    def _get_obs(self, price_forecast: list[float]) -> dict[int, np.ndarray]:
+        """Compiles observations for each agent, including the price forecast."""
         market_stats = [
             self.last_clearing_price,
             self.last_clearing_quantity,
@@ -233,17 +245,14 @@ class DoubleAuctionEnv(Env):
 
         observations: dict[int, np.ndarray] = {}
         for agent in self.agents:
-            # Agent's private info: Net Demand
             private_info = [agent.net_demand]
-
-            # Agent's observation: [ND_i] + [Public Market Stats]
-            obs_i = private_info + market_stats
+            obs_i = private_info + market_stats + price_forecast
             observations[agent.agent_id] = np.array(obs_i, dtype=np.float32)
 
         return observations
 
     def _calculate_rewards(self, clearing_price: float) -> dict[int, float]:
-        """Calculates the reward (profit) for all agents."""
+        """Calculates the reward (profit) for all agents for the current timestep."""
         rewards: dict[int, float] = {}
         for agent in self.agents:
             rewards[agent.agent_id] = agent.calculate_profit(clearing_price)
@@ -253,29 +262,28 @@ class DoubleAuctionEnv(Env):
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[int, np.ndarray], dict[str, Any]]:
-        """Resets the environment to an initial state, returning agent-specific observations."""
+        """Resets the environment."""
         super().reset(seed=seed)
         self.current_timestep = 0
-
-        # Reset public market stats
         self.last_clearing_price = 5.0
         self.last_clearing_quantity = 0.0
         self.last_total_bids_qty = 0.0
         self.last_total_offers_qty = 0.0
+        (
+            self.clearing_prices,
+            self.clearing_quantities,
+            self.profit_history,
+            self.net_demand_history,
+            self.action_history,
+        ) = [], [], [], [], []
 
-        # Reset history
-        self.clearing_prices = []
-        self.clearing_quantities = []
-        self.profit_history = []
-        self.net_demand_history = []
-        self.action_history = []
-
-        # Update initial net demands for all agents
         for agent in self.agents:
-            agent.calculate_net_demand()
-            agent.profit = 0.0  # Reset internal profit state
+            agent.calculate_net_demand(self.current_timestep)
+            agent.profit = 0.0
 
-        observation = self._get_obs()
+        # Initial forecast is zero
+        initial_forecast = [0.0] * (self.FORECAST_HORIZON - 1)
+        observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info
 
@@ -289,99 +297,79 @@ class DoubleAuctionEnv(Env):
         dict[str, int | float],
     ]:
         """
-        Runs one time step of the environment's dynamics, taking a dictionary of actions.
-
-        Args:
-            actions (dict[int, np.ndarray]): A dictionary mapping agent ID to its [Price, Quantity] action.
-
-        Returns (MARL Format):
-            observation (dict[int, np.ndarray]): New state for each agent.
-            reward (dict[int, float]): Reward for each agent.
-            terminated (dict[int, bool]): Termination status for each agent.
-            truncated (dict[int, bool]): Truncation status for each agent.
-            info (dict): Additional information.
+        Runs one time step.
+        - Clears the market for the first hour (t=0) of the action plan.
+        - Calculates rewards for t=0.
+        - Creates a price forecast for the next 23 hours.
+        - Returns observations including this forecast.
         """
         self.current_timestep += 1
 
-        # Parse Action and Compile Market Orders
+        # Compile Market Orders for the CURRENT HOUR (t=0)
         all_bids, all_offers = [], []
-
-        # Action history logs a list of all actions taken in this step
-        current_step_actions = []
-
         for agent in self.agents:
             agent_id = agent.agent_id
             if agent_id in actions:
-                price, quantity = actions[agent_id]
+                # Use only the action for the current hour (index 0)
+                price, quantity = actions[agent_id][0]
                 bids, offers = agent.get_market_submission(price, quantity)
                 if bids:
                     all_bids.extend(bids)
                 if offers:
                     all_offers.extend(offers)
-                current_step_actions.append(actions[agent_id])
-            else:
-                # Handle missing action (e.g., if an agent is done, though here all run simultaneously)
-                pass
 
-        total_bids_qty = sum(q for _, q, _ in all_bids)
-        total_offers_qty = sum(q for _, q, _ in all_offers)
+        total_bids_qty = sum(b[2] for b in all_bids)
+        total_offers_qty = sum(o[2] for o in all_offers)
 
-        self.action_history.append(
-            np.concatenate(current_step_actions)
-            if current_step_actions
-            else np.array([])
-        )
-
-        # Market Clearing
+        # Market Clearing for the CURRENT HOUR
         bids_array = np.array(all_bids, dtype=float) if all_bids else np.array([])
         offers_array = np.array(all_offers, dtype=float) if all_offers else np.array([])
         self.market_orders_history.append((bids_array.copy(), offers_array.copy()))
+
         clearing_price, clearing_quantity = self.market_agent.clear_market(
             bids_array, offers_array
         )
 
+        # Calculate Rewards based on CURRENT HOUR's outcome
         reward = self._calculate_rewards(clearing_price)
 
-        self.last_clearing_price = (
-            clearing_price  # Storing P_t as P_t-1 for the next step
-        )
+        # Generate Price Forecast for the NEXT 23 HOURS
+        price_forecast = self._forecast_prices(actions)
+
+        # Update State for the next observation
+        self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
         self.last_total_bids_qty = total_bids_qty
         self.last_total_offers_qty = total_offers_qty
 
+        # Update agents' internal states for the next real timestep
         for agent in self.agents:
-            agent.calculate_net_demand()
+            agent.calculate_net_demand(self.current_timestep)
 
-        # Check Termination and Get Observation/Info
+        # Check Termination and Get Next Observation
         is_truncated = self.current_timestep >= self.max_timesteps
-
-        # For MARL, termination/truncation status is usually specified per agent
         terminated = {i: False for i in self.agent_ids}
         truncated = {i: is_truncated for i in self.agent_ids}
 
-        observation = self._get_obs()
+        observation = self._get_obs(price_forecast)
 
         # Log history
         self.clearing_prices.append(clearing_price)
         self.clearing_quantities.append(clearing_quantity)
-        self.profit_history.append(
-            np.array(list(reward.values()))
-        )  # Log as numpy array for plotting
+        self.profit_history.append(np.array(list(reward.values())))
         self.net_demand_history.append([agent.net_demand for agent in self.agents])
 
         info = {
             "timestep": self.current_timestep,
             "clearing_price": clearing_price,
             "clearing_quantity": clearing_quantity,
+            "price_forecast": price_forecast,
         }
 
         return observation, reward, terminated, truncated, info
 
     def render(self, mode="human"):
-        """
-        Placeholder for rendering logic, usually involving Matplotlib/Pygame.
-        In this case, we just print the state.
-        """
+        """Prints the state."""
         if mode == "human":
             last_total_reward = (
                 self.profit_history[-1].sum() if self.profit_history else 0.0
@@ -469,7 +457,6 @@ class DoubleAuctionEnv(Env):
         plt.legend()
         plt.tight_layout()
 
-        # Only call show once to display both Plot 1 and Plot 2 figures simultaneously
         plt.show()
 
     def plot_bid_ask_curves(self, num_plots=10):
@@ -702,6 +689,37 @@ class DoubleAuctionEnv(Env):
             )
 
         # Only call show once to display all generated Bid-Ask Curve figures simultaneously
+        plt.show()
+
+    def plot_price_change_for_single_day(self, day: int = 0):
+        """
+        Plots the market clearing price for each hour of a specific simulation day.
+
+        Args:
+            day (int): The day number to plot (e.g., 0 for the first day).
+        """
+        plt.figure(figsize=(10, 5))
+
+        # Calculate the start and end timesteps for the requested day
+        start_index = day * 24
+        end_index = start_index + 24
+
+        if self.current_timestep < start_index:
+            print(f"Simulation has not reached day {day}. No data to plot.")
+            return
+
+        # Slice the price history for the specific day
+        daily_prices = self.clearing_prices[start_index:end_index]
+        hours = range(len(daily_prices))
+
+        plt.plot(hours, daily_prices, marker="o", linestyle="-", color="c")
+        plt.title(f"Market Clearing Price vs. Hour for Day {day}")
+        plt.xlabel("Hour of Day")
+        plt.ylabel("Clearing Price ($)")
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.xticks(np.arange(0, 24, 2))  # Set x-axis ticks for every 2 hours
+        plt.xlim(-0.5, 23.5)  # Set x-axis limits
+        plt.tight_layout()
         plt.show()
 
 
