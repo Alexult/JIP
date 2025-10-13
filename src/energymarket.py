@@ -4,7 +4,7 @@ from custom_types import *
 from gymnasium import Env
 from gymnasium.spaces import Box
 from abc import ABC, abstractmethod
-from prosumers import *
+from prosumer import *
 import matplotlib.pyplot as plt
 import math
 from loguru import logger

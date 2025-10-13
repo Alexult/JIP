@@ -11,28 +11,35 @@ class ProsumerAgent:
     """
 
     def __init__(
-        self,
-        agent_id: int,
-        fixed_load: float,
-        flexible_load_max: float,
-        generation_capacity: float,
+            self,
+            agent_id: int,
+            load: [Job],
+            capacity: float,
     ):
         self.agent_id = agent_id
-        self.fixed_load = fixed_load
-        self.flexible_load_max = flexible_load_max
-        self.generation_capacity = generation_capacity
-        self.net_demand = 0.0
+        self.load = load
+        self.capacity = capacity
+        self.schedule = [(job, -1) for job in load]
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
         self.profit = 0.0
 
-    def calculate_net_demand(self):
-        """Simulates the agent's internal state for a new timestep (i.e., external factors)."""
-        current_flexible_load = random.uniform(0, self.flexible_load_max)
-        total_load = self.fixed_load + current_flexible_load
-        self.net_demand = total_load - self.generation_capacity
+    """
+    examples of job flexibility
+    fixed = lambda job, t: 1 if job[1] == t else 0
+
+    c = 0.5
+    linear = lambda job, t: max(1 - abs(job[1] - t) * c, 0)
+
+
+    a = 0.2
+    b = 0.1
+    quadratic = lambda job, t: max(abs(job[1] - t)**2 * a + abs(job[1] - t) * b, 0)
+
+    free = lambda job, t: 1
+    """
 
     def get_market_submission(
-        self, price: float, quantity: float
+            self, price: float, quantity: float
     ) -> tuple[list[Bid], list[Offer]]:
         """
         Takes the action (price, quantity) from the strategy method and translates it
