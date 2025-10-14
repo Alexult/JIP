@@ -2,41 +2,50 @@ from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent
 from loguru import logger
 
 if __name__ == "__main__":
+
+    fixed = lambda job, t: 1 if job[1] == t else 0
+
+    c = 0.4
+    linear = lambda job, t: max(1 - abs(job[1] - t) * c, 0)
+
+    free = lambda job, t: 1
+
     AGENT_CONFIGS = [
         {
             "class": "AggressiveSellerAgent",
-            "fixed_load": 10,
-            "flexible_load_max": 8,
+            "load": [(10, 2, free)],
+            "flexible_load": 20,
             "generation_capacity": 40,
+            "generation_type": "solar"
         },
         {
             "class": "AggressiveBuyerAgent",
-            "fixed_load": 18,
-            "flexible_load_max": 7,
+            "load": [(40, 1, linear), (30, 8, fixed)],
+            "flexible_load": 50,
             "generation_capacity": 5,
         },
         {
             "class": "ProsumerAgent",
-            "fixed_load": 12,
-            "flexible_load_max": 6,
+            "load": [(40, 17, free), (67, 8, fixed)],
+            "flexible_load": 6,
             "generation_capacity": 30,
             "generation_type": "wind",
         },
         {
             "class": "ProsumerAgent",
-            "fixed_load": 34,
-            "flexible_load_max": 9,
-            "generation_capacity": 18,
+            "load": [(20, 12, linear), (30, 14, fixed)],
+            "flexible_load": 30,
+            "generation_capacity": 25,
             "generation_type": "wind",
         },
         {
             "class": "ProsumerAgent",
-            "fixed_load": 19,
-            "flexible_load_max": 5,
+            "load": [(34, 4, linear), (24, 16, fixed)],
+            "flexible_load": 5,
             "generation_capacity": 11,
         },
     ]
-    MAX_STEPS = 24 * 10
+    MAX_STEPS = 23
 
     env = DoubleAuctionEnv(
         agent_configs=AGENT_CONFIGS,

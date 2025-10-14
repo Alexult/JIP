@@ -3,8 +3,8 @@ from custom_types import *
 from prosumer import *
 
 
-class MyTestCase(unittest.TestCase):
-    def test_flexiblity_reward(self):
+class ProsumerTest(unittest.TestCase):
+    def test_flexibility_reward(self):
         fixed = lambda job, t: 1 if job[1] == t else 0
 
         c = 0.4
@@ -37,10 +37,17 @@ class MyTestCase(unittest.TestCase):
 
         free = lambda job, t: 1
 
-        prosumer = ProsumerAgent(1, [(4.5, 4, fixed), (3.1, 3, free), (3, 2, linear)], 5)
+        prosumer = ProsumerAgent(1, [(4.5, 4, fixed), (3.1, 3, free), (3, 14, linear)], 24,
+                                 5, generation_type="solar")
 
         self.assertIsInstance(prosumer, ProsumerAgent)
+        self.assertEqual(5, prosumer.generation_capacity)
+        self.assertEqual(4.1, prosumer.schedule[3])
 
+        prosumer.calculate_net_demand(3)
+        self.assertEqual(4.1, prosumer.net_demand)
+        prosumer.calculate_net_demand(14)
+        self.assertGreater(4, prosumer.net_demand)
 
 
 if __name__ == '__main__':

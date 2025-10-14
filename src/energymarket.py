@@ -138,8 +138,8 @@ class DoubleAuctionEnv(Env):
             self.agents.append(
                 AgentClass(
                     agent_id=i,
-                    fixed_load=config["fixed_load"],
-                    flexible_load_max=config["flexible_load_max"],
+                    load=config["load"],
+                    flexible_load=config["flexible_load"],
                     generation_capacity=config["generation_capacity"],
                     generation_type=config["generation_type"]
                     if "generation_type" in config
@@ -166,7 +166,7 @@ class DoubleAuctionEnv(Env):
         # --- Define Observation Space (Per Agent) ---
         # Obs: [ND_i] + [Market_Stats (4)] + [Price_Forecast (23)]
         MAX_DEMAND_ABS = max(
-            c["fixed_load"] + c["flexible_load_max"] for c in agent_configs
+            max(c.schedule) for c in self.agents
         )
         MAX_CAPACITY = max(c["generation_capacity"] for c in agent_configs)
         MAX_NET_DEMAND = MAX_DEMAND_ABS
