@@ -14,7 +14,7 @@ if __name__ == "__main__":
         {
             "class": "AggressiveSellerAgent",
             "load": [(10, 2, free)],
-            "flexible_load": 20,
+            "flexible_load": 1,
             "generation_capacity": 40,
             "generation_type": "solar"
         },
@@ -28,14 +28,14 @@ if __name__ == "__main__":
             "class": "ProsumerAgent",
             "load": [(40, 17, free), (67, 8, fixed)],
             "flexible_load": 6,
-            "generation_capacity": 30,
+            "generation_capacity": 50,
             "generation_type": "wind",
         },
         {
             "class": "ProsumerAgent",
             "load": [(20, 12, linear), (30, 14, fixed)],
-            "flexible_load": 30,
-            "generation_capacity": 25,
+            "flexible_load": 5,
+            "generation_capacity": 60,
             "generation_type": "wind",
         },
         {
@@ -54,6 +54,7 @@ if __name__ == "__main__":
     )
 
     logger.info(f"Starting MARL Episode Demo ({MAX_STEPS} steps)")
+
 
     # Initial observation received upon reset
     observations, info = env.reset()
