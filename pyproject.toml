@@ -1,0 +1,14 @@
+[project]
+name = "jip"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gymnasium>=1.2.1",
+    "loguru>=0.7.3",
+    "matplotlib>=3.10.7",
+    "networkx>=3.5",
+    "numpy>=2.3.3",
+    "pandas>=2.3.3",
+]
