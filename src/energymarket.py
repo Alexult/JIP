@@ -28,7 +28,7 @@ class MarketClearingAgent(ABC):
 
     @abstractmethod
     def clear_market(
-        self, bids_array: np.ndarray, offers_array: np.ndarray
+            self, bids_array: np.ndarray, offers_array: np.ndarray
     ) -> MarketResult:
         pass
 
@@ -43,7 +43,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
 
     @override
     def clear_market(
-        self, bids_array: np.ndarray, offers_array: np.ndarray
+            self, bids_array: np.ndarray, offers_array: np.ndarray
     ) -> MarketResult:
         """
         Determines the market clearing price and quantity.
@@ -58,10 +58,10 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
             return 0.0, 0.0
 
         if (
-            bids_array.ndim != 2
-            or bids_array.shape[1] != 3
-            or offers_array.ndim != 2
-            or offers_array.shape[1] != 3
+                bids_array.ndim != 2
+                or bids_array.shape[1] != 3
+                or offers_array.ndim != 2
+                or offers_array.shape[1] != 3
         ):
             raise ValueError(
                 f"Input arrays must be of shape (N, 3) ([Agent ID, Price, Quantity]). "
@@ -106,10 +106,10 @@ class DoubleAuctionEnv(Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
     def __init__(
-        self,
-        agent_configs: list[dict[str, Any]],
-        market_clearing_agent: MarketClearingAgent,
-        max_timesteps: int = 100,
+            self,
+            agent_configs: list[dict[str, Any]],
+            market_clearing_agent: MarketClearingAgent,
+            max_timesteps: int = 100,
     ):
         super().__init__()
 
@@ -143,7 +143,7 @@ class DoubleAuctionEnv(Env):
                     generation_capacity=config["generation_capacity"],
                     generation_type=config["generation_type"]
                     if "generation_type" in config
-                    and config["generation_type"] is not None
+                       and config["generation_type"] is not None
                     else "solar",
                 )
             )
@@ -165,6 +165,8 @@ class DoubleAuctionEnv(Env):
 
         # --- Define Observation Space (Per Agent) ---
         # Obs: [ND_i] + [Market_Stats (4)] + [Price_Forecast (23)]
+
+        # This section is crazy and idk what it does
         MAX_DEMAND_ABS = max(
             max(c.schedule) for c in self.agents
         )
@@ -214,13 +216,12 @@ class DoubleAuctionEnv(Env):
                 agent_id = agent.agent_id
                 if agent_id in actions:
                     # Get the planned action for future hour 'h'
-                    price, quantity = actions[agent_id][h]
-                    # Use the agent's CURRENT net_demand to determine if it's a bid or offer
-                    bids, offers = agent.get_market_submission(price, quantity)
-                    if bids:
-                        future_bids.extend(bids)
-                    if offers:
-                        future_offers.extend(offers)
+                    price, quantity = actions[agent_id][0][h]
+                    if quantity == 0:
+                        price, quality = actions[agent_id][1][h]
+                        future_offers.extend([(price, quality)])
+                    else:
+                        future_bids.extend([(price, quantity)])
 
             bids_arr = (
                 np.array(future_bids, dtype=float) if future_bids else np.array([])
@@ -245,8 +246,7 @@ class DoubleAuctionEnv(Env):
 
         observations: dict[int, np.ndarray] = {}
         for agent in self.agents:
-            private_info = [agent.net_demand]
-            obs_i = private_info + market_stats + price_forecast
+            obs_i = agent.net_demand + market_stats + price_forecast
             observations[agent.agent_id] = np.array(obs_i, dtype=np.float32)
 
         return observations
@@ -260,7 +260,7 @@ class DoubleAuctionEnv(Env):
 
     @override
     def reset(
-        self, seed: int | None = None, options: dict[str, Any] | None = None
+            self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[int, np.ndarray], dict[str, Any]]:
         """Resets the environment."""
         super().reset(seed=seed)
@@ -278,7 +278,7 @@ class DoubleAuctionEnv(Env):
         ) = [], [], [], [], []
 
         for agent in self.agents:
-            agent.calculate_net_demand(self.current_timestep)
+            agent.calculate_net_demand()
             agent.profit = 0.0
 
         # Initial forecast is zero
@@ -288,7 +288,7 @@ class DoubleAuctionEnv(Env):
         return observation, info
 
     def step(
-        self, actions: dict[int, np.ndarray]
+            self, actions: dict[int, np.ndarray]
     ) -> tuple[
         dict[int, np.ndarray],
         dict[int, float],
@@ -311,12 +311,12 @@ class DoubleAuctionEnv(Env):
             agent_id = agent.agent_id
             if agent_id in actions:
                 # Use only the action for the current hour (index 0)
-                price, quantity = actions[agent_id][0]
-                bids, offers = agent.get_market_submission(price, quantity)
-                if bids:
-                    all_bids.extend(bids)
-                if offers:
-                    all_offers.extend(offers)
+                price, quantity = actions[agent_id][0][0]
+                if quantity == 0:
+                    price, quantity = actions[agent_id][1][0]
+                    all_offers.extend([(price, quantity)])
+                else:
+                    all_bids.extend([(price, quantity)])
 
         total_bids_qty = sum(b[2] for b in all_bids)
         total_offers_qty = sum(o[2] for o in all_offers)
@@ -344,7 +344,7 @@ class DoubleAuctionEnv(Env):
 
         # Update agents' internal states for the next real timestep
         for agent in self.agents:
-            agent.calculate_net_demand(self.current_timestep)
+            agent.calculate_net_demand()
 
         # Check Termination and Get Next Observation
         is_truncated = self.current_timestep >= self.max_timesteps
