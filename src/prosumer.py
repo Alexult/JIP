@@ -18,15 +18,20 @@ class ProsumerAgent:
             self,
             agent_id: int,
             load: [Job],
-            capacity: float,
+            flexible_load: float,
+            generation_capacity: float,
+            generation_type: str = "solar"
     ):
         self.agent_id = agent_id
-        self.load = load
-        self.capacity = capacity
-        self.schedule = [(job, -1) for job in load]
+        self.load = load  # energy demand must be met entirely or not. can move according to the lambda in the job
+        self.flexible_load = flexible_load  # can be assigned anywhere in any amount
+        self.generation_capacity = generation_capacity
+        self.generation_type = generation_type
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
         self.profit = 0.0
-        self.generation_type = generation_type
+        self.schedule = [sum([job[0] for job in load if job[1] == t]) + flexible_load / FORECAST_HORIZON for t in
+                         range(FORECAST_HORIZON)]  # current schedule to buy energy. Change this to change behaviour
+        self.net_demand = None
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
         df = pd.read_csv(generation_data_file)
@@ -63,15 +68,8 @@ class ProsumerAgent:
             if self.generation_type == "solar"
             else self._calc_wind_generation(hour_of_day)
         )
-        # current_flexible_load = random.uniform(0, self.flexible_load_max)
-        # TODO: This is a hack, instead maybe ask for mean and sigma from the profile instead of max
-        sigma = self.flexible_load_max / 4
-        current_flexible_load = random.gauss(
-            self.flexible_load_max - 2 * sigma, sigma
-        )  # based on CBS data
-        # logger.debug(f"uniform load: {current_flexible_load}, gauss load:{current_flexible_load_temp}")
-        total_load = self.fixed_load + current_flexible_load
-        self.net_demand = total_load - effective_generation
+        self.net_demand = self.schedule[timestep] - effective_generation
+
     """
     examples of job flexibility
     fixed = lambda job, t: 1 if job[1] == t else 0
