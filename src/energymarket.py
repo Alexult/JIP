@@ -219,9 +219,9 @@ class DoubleAuctionEnv(Env):
                     price, quantity = actions[agent_id][0][h]
                     if quantity == 0:
                         price, quality = actions[agent_id][1][h]
-                        future_offers.extend([(price, quality)])
+                        future_offers.extend([(agent_id, price, quality)])
                     else:
-                        future_bids.extend([(price, quantity)])
+                        future_bids.extend([(agent_id, price, quantity)])
 
             bids_arr = (
                 np.array(future_bids, dtype=float) if future_bids else np.array([])
@@ -314,9 +314,9 @@ class DoubleAuctionEnv(Env):
                 price, quantity = actions[agent_id][0][0]
                 if quantity == 0:
                     price, quantity = actions[agent_id][1][0]
-                    all_offers.extend([(price, quantity)])
+                    all_offers.extend([(agent_id, price, quantity)])
                 else:
-                    all_bids.extend([(price, quantity)])
+                    all_bids.extend([(agent_id, price, quantity)])
 
         total_bids_qty = sum(b[2] for b in all_bids)
         total_offers_qty = sum(o[2] for o in all_offers)
