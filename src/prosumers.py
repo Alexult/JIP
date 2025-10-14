@@ -76,7 +76,8 @@ class ProsumerAgent:
             if self.generation_type == "solar"
             else self._calc_wind_generation(hour_of_day)
         )
-        current_flexible_load = random.uniform(0, self.flexible_load_max)
+        #current_flexible_load = random.uniform(0, self.flexible_load_max)
+        current_flexible_load = random.gauss(103.2, 20) #based on CBS data
         total_load = self.fixed_load + current_flexible_load
         self.net_demand = total_load - effective_generation
 
