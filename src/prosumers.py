@@ -32,7 +32,7 @@ class ProsumerAgent:
         self.profit = 0.0
         self.generation_type = generation_type
 
-        generation_data_file = "./hourly_wind_solar_data.csv"
+        generation_data_file = "./data/hourly_wind_solar_data.csv"
         df= pd.read_csv(generation_data_file)
         self.solar_data = df["Solar - Actual Aggregated [MW] (D)"].to_numpy()
         self.wind_data = df["Wind Onshore - Actual Aggregated [MW] (D)"].to_numpy()
