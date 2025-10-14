@@ -122,10 +122,23 @@ class ProsumerAgent:
         """
         # Obs: [ND_i, P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1, P_f_1, ..., P_f_23]
 
-        net_demand = obs[0]
-        last_price = obs[1]
+        info = obs[FORECAST_HORIZON:FORECAST_HORIZON + 4]
+        prediction = [obs[FORECAST_HORIZON+5:]]
 
-        # actions = []
+        last_price = info[0]
+        price_noise = 1 + (random.uniform(-0.1, 0.1) * (1 / FORECAST_HORIZON))
+
+        if info[2] == 0 and info[3] == 0:
+            zero = np.zeros(FORECAST_HORIZON)
+            bids = np.where(self.net_demand >= zero, self.net_demand, zero)
+            offers = np.where(self.net_demand < zero, self.net_demand, zero)
+            bids = [((last_price * 1.05 - 0.1) * price_noise**i, quantity) for i, quantity in enumerate(bids)]
+            offers = [((last_price * 0.95 - 0.1) * price_noise**i, np.abs(quantity)) for i, quantity in enumerate(offers)]
+            return np.array([bids, offers], dtype=np.float32)
+
+
+
+        # actions = ]
         #
         # prices = np.zeros(FORECAST_HORIZON)
         # # --- Simple Strategy Logic for 24 hours ---
@@ -162,6 +175,7 @@ class AggressiveSellerAgent(ProsumerAgent):
     """Aggressive seller: sells entire surplus at minimum price for all 24 hours."""
 
     def devise_strategy(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
+        return super().devise_strategy(obs, action_space)
         # net_demand = obs[0]
         # last_price = obs[1]
         #
@@ -182,15 +196,16 @@ class AggressiveSellerAgent(ProsumerAgent):
         # action_plan = np.tile([price, quantity], (FORECAST_HORIZON, 1))
         # return action_plan.astype(np.float32)
 
-        bids = np.zeros((FORECAST_HORIZON, 2))
-        offers = np.zeros((FORECAST_HORIZON, 2))
-        x = np.array([bids, offers], dtype=np.float32)
-        return x
+        # bids = np.zeros((FORECAST_HORIZON, 2))
+        # offers = np.zeros((FORECAST_HORIZON, 2))
+        # x = np.array([bids, offers], dtype=np.float32)
+        # return x
 
 class AggressiveBuyerAgent(ProsumerAgent):
     """Aggressive buyer: buys to cover deficit at maximum price for all 24 hours."""
 
     def devise_strategy(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
+        return super().devise_strategy(obs, action_space)
         # net_demand = obs[0]
         # last_price = obs[1]
         # MAX_PRICE = action_space.high[0, 0]
@@ -211,7 +226,7 @@ class AggressiveBuyerAgent(ProsumerAgent):
         # # Create a (24, 2) array by repeating the same action 24 times
         # action_plan = np.tile([price, quantity], (FORECAST_HORIZON, 1))
         # return action_plan.astype(np.float32)
-        bids = np.zeros((FORECAST_HORIZON, 2))
-        offers = np.zeros((FORECAST_HORIZON, 2))
-        x = np.array([bids, offers], dtype=np.float32)
-        return x
+        # bids = np.zeros((FORECAST_HORIZON, 2))
+        # offers = np.zeros((FORECAST_HORIZON, 2))
+        # x = np.array([bids, offers], dtype=np.float32)
+        # return x
