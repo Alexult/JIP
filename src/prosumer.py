@@ -128,13 +128,15 @@ class ProsumerAgent:
         last_price = info[0]
         price_noise = 1 + (random.uniform(-0.1, 0.1) * (1 / FORECAST_HORIZON))
 
-        if info[2] == 0 and info[3] == 0:
-            zero = np.zeros(FORECAST_HORIZON)
-            bids = np.where(self.net_demand >= zero, self.net_demand, zero)
-            offers = np.where(self.net_demand < zero, self.net_demand, zero)
-            bids = [((last_price * 1.05 - 0.1) * price_noise**i, quantity) for i, quantity in enumerate(bids)]
-            offers = [((last_price * 0.95 - 0.1) * price_noise**i, np.abs(quantity)) for i, quantity in enumerate(offers)]
-            return np.array([bids, offers], dtype=np.float32)
+        # if info[2] == 0 and info[3] == 0:
+        zero = np.zeros(FORECAST_HORIZON)
+        bids = np.where(self.net_demand >= zero, self.net_demand, zero)
+        offers = np.where(self.net_demand < zero, self.net_demand, zero)
+        bids = [((last_price * 1.05 - 0.1) * price_noise**i, quantity) for i, quantity in enumerate(bids)]
+        offers = [((last_price * 0.95 - 0.1) * price_noise**i, np.abs(quantity)) for i, quantity in enumerate(offers)]
+        self.net_demand = self.net_demand[1:] + self.net_demand[:1]
+        self.schedule = self.schedule[1:] + self.schedule[:1]
+        return np.array([bids, offers], dtype=np.float32)
 
 
 
