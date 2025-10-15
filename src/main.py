@@ -70,7 +70,7 @@ if __name__ == "__main__":
             obs_i = observations[agent_id]
 
             # --- CALL AGENT'S DEVISE_STRATEGY METHOD (Uses ProsumerAgent or subclass method) ---
-            actions[agent_id] = env.agents[agent_id].devise_strategy(
+            actions[agent_id] = env.agents[agent_id].devise_strategy_smarter(
                 obs_i, env.action_space
             )
 
