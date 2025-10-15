@@ -33,24 +33,28 @@ class ProsumerAgent:
         self.generation_type = generation_type
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
-        df= pd.read_csv(generation_data_file)
+        df = pd.read_csv(generation_data_file)
         self.solar_data = df["Solar - Actual Aggregated [MW] (D)"].to_numpy()
         self.wind_data = df["Wind Onshore - Actual Aggregated [MW] (D)"].to_numpy()
-        self.multiplicative_factor = [self.generation_capacity/self.solar_data.max(), self.generation_capacity/self.wind_data.max()]
-        # print(self.wind_data)
-        
+        self.multiplicative_factor = [
+            self.generation_capacity / self.solar_data.max(),
+            self.generation_capacity / self.wind_data.max(),
+        ]
+        del df
+        del generation_data_file
 
     def _calc_solar_generation(self, hour_of_day: int):
-        effective_generation = self.solar_data[hour_of_day] *self.multiplicative_factor[0]
-        print("Solar generated: ",effective_generation)
+        effective_generation = (
+            self.solar_data[hour_of_day] * self.multiplicative_factor[0]
+        )
 
         return effective_generation
 
     def _calc_wind_generation(self, hour_of_day: int) -> float:
-        effective_generation = self.wind_data[hour_of_day]*self.multiplicative_factor[1]
-        print("Wind generated: ",effective_generation)
+        effective_generation = (
+            self.wind_data[hour_of_day] * self.multiplicative_factor[1]
+        )
         return effective_generation
-
 
     def calculate_net_demand(self, timestep: int):
         """
