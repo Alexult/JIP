@@ -2,6 +2,7 @@ import numpy as np
 from gymnasium.spaces import Box
 from custom_types import *
 import random
+import pandas as pd
 
 FORECAST_HORIZON = 24
 
@@ -31,38 +32,28 @@ class ProsumerAgent:
         self.profit = 0.0
         self.generation_type = generation_type
 
+        generation_data_file = "./data/hourly_wind_solar_data.csv"
+        df = pd.read_csv(generation_data_file)
+        self.solar_data = df["Solar - Actual Aggregated [MW] (D)"].to_numpy()
+        self.wind_data = df["Wind Onshore - Actual Aggregated [MW] (D)"].to_numpy()
+        self.multiplicative_factor = [
+            self.generation_capacity / self.solar_data.max(),
+            self.generation_capacity / self.wind_data.max(),
+        ]
+        del df
+        del generation_data_file
+
     def _calc_solar_generation(self, hour_of_day: int):
-        # Model a simple solar generation curve (peaks at noon, zero at night)
-        effective_generation = 0.0
-        # Assume sun is out from 6:00 (hour 6) to 18:00 (hour 18)
-        if 6 <= hour_of_day <= 18:
-            # Use a sine curve to model the rise and fall of solar power
-            # The argument to sin() goes from 0 to pi over the 12 daylight hours
-            peak_hour = 12
-            daylight_duration = 12
-            radians = (hour_of_day - 6) * np.pi / daylight_duration
-            solar_factor: float = np.sin(radians)
-            effective_generation = self.generation_capacity * solar_factor
+        effective_generation = (
+            self.solar_data[hour_of_day] * self.multiplicative_factor[0]
+        )
+
         return effective_generation
 
     def _calc_wind_generation(self, hour_of_day: int) -> float:
-        """
-        Models a simple onshore wind generation curve using a cosine function
-        (peaks at midnight, troughs at noon).
-
-        Args:
-            hour_of_day (int): The hour (0 to 23).
-
-        Returns:
-            float: The effective generation (in capacity units, e.g., MW).
-        """
-        radians: float = hour_of_day * 2 * np.pi / 24
-
-        capacity_factor: float = 0.425 + 0.225 * np.cos(radians)
-
-        # Effective generation is Capacity * CF
-        effective_generation = self.generation_capacity * capacity_factor
-
+        effective_generation = (
+            self.wind_data[hour_of_day] * self.multiplicative_factor[1]
+        )
         return effective_generation
 
     def calculate_net_demand(self, timestep: int):
