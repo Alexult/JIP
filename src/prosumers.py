@@ -3,6 +3,7 @@ from gymnasium.spaces import Box
 from custom_types import *
 import random
 import pandas as pd
+from loguru import logger
 
 FORECAST_HORIZON = 24
 
@@ -67,8 +68,13 @@ class ProsumerAgent:
             if self.generation_type == "solar"
             else self._calc_wind_generation(hour_of_day)
         )
-        #current_flexible_load = random.uniform(0, self.flexible_load_max)
-        current_flexible_load = random.gauss(103.2, 20) #based on CBS data
+        # current_flexible_load = random.uniform(0, self.flexible_load_max)
+        # TODO: This is a hack, instead maybe ask for mean and sigma from the profile instead of max
+        sigma = self.flexible_load_max / 4
+        current_flexible_load = random.gauss(
+            self.flexible_load_max - 2 * sigma, sigma
+        )  # based on CBS data
+        # logger.debug(f"uniform load: {current_flexible_load}, gauss load:{current_flexible_load_temp}")
         total_load = self.fixed_load + current_flexible_load
         self.net_demand = total_load - effective_generation
 
