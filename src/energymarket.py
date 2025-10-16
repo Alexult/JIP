@@ -55,7 +55,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         """
         # Check if arrays are empty
         if bids_array.size == 0 or offers_array.size == 0:
-            return 0.0, 0.0,[]
+            return 0.0, 0.0, []
 
         if (
             bids_array.ndim != 2
@@ -104,7 +104,6 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
 
 
         return (clearing_price, clearing_quantity, cleared_participants)
-        # , bought_energy)
 
 
 class DoubleAuctionEnv(Env):
