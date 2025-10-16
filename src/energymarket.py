@@ -371,7 +371,7 @@ class DoubleAuctionEnv(Env):
             if agent_id in actions:
                 # Use only the action for the current hour (index 0)
                 price, quantity = actions[agent_id][0][0]
-                # If bid quantity is 0, check the offers  
+                # If bid quantity is 0, check the offers
                 if quantity == 0:
                     price, quantity = actions[agent_id][1][0]
                     if quantity > 0:

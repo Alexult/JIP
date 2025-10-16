@@ -2,7 +2,6 @@ from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent
 from loguru import logger
 
 if __name__ == "__main__":
-
     fixed = lambda job, t: 1 if job[1] == t else 0
 
     c = 0.4
@@ -59,7 +58,6 @@ if __name__ == "__main__":
     )
 
     logger.info(f"Starting MARL Episode Demo ({MAX_STEPS} steps)")
-
 
     # Initial observation received upon reset
     observations, info = env.reset()

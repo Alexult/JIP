@@ -3,7 +3,7 @@ from typing import Callable
 
 Bid = tuple[int, float, float]  # (agent_id, price, quantity)
 Offer = tuple[int, float, float]  # (agent_id, price, quantity)
-MarketResult = tuple[float, float,list[tuple[int,float]]]
+MarketResult = tuple[float, float, list[tuple[int, float]]]
 Job = tuple[float, int, Callable]
 
 """

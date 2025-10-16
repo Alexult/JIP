@@ -37,8 +37,13 @@ class ProsumerTest(unittest.TestCase):
 
         free = lambda job, t: 1
 
-        prosumer = ProsumerAgent(1, [(4.5, 4, fixed), (3.1, 3, free), (3, 14, linear)], 24,
-                                 5, generation_type="solar")
+        prosumer = ProsumerAgent(
+            1,
+            [(4.5, 4, fixed), (3.1, 3, free), (3, 14, linear)],
+            24,
+            5,
+            generation_type="solar",
+        )
 
         self.assertIsInstance(prosumer, ProsumerAgent)
         self.assertEqual(5, prosumer.generation_capacity)
@@ -50,5 +55,5 @@ class ProsumerTest(unittest.TestCase):
         self.assertGreater(4, prosumer.net_demand)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

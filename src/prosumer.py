@@ -15,13 +15,13 @@ class ProsumerAgent:
     """
 
     def __init__(
-            self,
-            agent_id: int,
-            load: [Job],
-            flexible_load: float,
-            fixed_load: float,
-            generation_capacity: float,
-            generation_type: str = "solar"
+        self,
+        agent_id: int,
+        load: [Job],
+        flexible_load: float,
+        fixed_load: float,
+        generation_capacity: float,
+        generation_type: str = "solar",
     ):
         self.agent_id = agent_id
         self.load = load  # energy demand must be met entirely or not. can move according to the lambda in the job
@@ -31,8 +31,12 @@ class ProsumerAgent:
         self.generation_type = generation_type
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
         self.profit = 0.0
-        self.schedule = [sum([job[0] for job in load if job[1] == t]) + flexible_load / FORECAST_HORIZON + fixed_load
-                         for t in range(FORECAST_HORIZON)]  # current schedule to buy energy. Change this to change behaviour
+        self.schedule = [
+            sum([job[0] for job in load if job[1] == t])
+            + flexible_load / FORECAST_HORIZON
+            + fixed_load
+            for t in range(FORECAST_HORIZON)
+        ]  # current schedule to buy energy. Change this to change behaviour
         self.net_demand = None
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
@@ -79,7 +83,7 @@ class ProsumerAgent:
         return self.schedule[timestep] - effective_generation
 
     def get_market_submission(
-            self, price: float, quantity: float
+        self, price: float, quantity: float
     ) -> tuple[list[Bid], list[Offer]]:
         """
         Takes a single action (price, quantity) and translates it into a bid or offer.
@@ -99,7 +103,7 @@ class ProsumerAgent:
 
         return bids, offers
 
-    def calculate_profit(self, clearing_price: float, qty_got:float) -> float:
+    def calculate_profit(self, clearing_price: float, qty_got: float) -> float:
         """Calculates profit based on the last action submitted for the cleared hour."""
         profit = 0.0
         if self.last_bid_offer:
@@ -115,7 +119,6 @@ class ProsumerAgent:
         return profit
 
     def devise_strategy(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
-        
         """
         [DEFAULT STRATEGY]
         Defines the agent's 24-hour action plan based on its current observation.
@@ -125,8 +128,8 @@ class ProsumerAgent:
         """
         # Obs: [ND_i, P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1, P_f_1, ..., P_f_23]
 
-        info = obs[FORECAST_HORIZON:FORECAST_HORIZON + 4]
-        prediction = [obs[FORECAST_HORIZON+5:]]
+        info = obs[FORECAST_HORIZON : FORECAST_HORIZON + 4]
+        prediction = [obs[FORECAST_HORIZON + 5 :]]
 
         last_price = info[0]
         price_noise = 1 + (random.uniform(-0.1, 0.1) * (1 / FORECAST_HORIZON))
@@ -135,13 +138,17 @@ class ProsumerAgent:
         zero = np.zeros(FORECAST_HORIZON)
         bids = np.where(self.net_demand >= zero, self.net_demand, zero)
         offers = np.where(self.net_demand < zero, self.net_demand, zero)
-        bids = [((last_price * 1.05 - 0.1) * price_noise**i, quantity) for i, quantity in enumerate(bids)]
-        offers = [((last_price * 0.95 - 0.1) * price_noise**i, np.abs(quantity)) for i, quantity in enumerate(offers)]
+        bids = [
+            ((last_price * 1.05 - 0.1) * price_noise**i, quantity)
+            for i, quantity in enumerate(bids)
+        ]
+        offers = [
+            ((last_price * 0.95 - 0.1) * price_noise**i, np.abs(quantity))
+            for i, quantity in enumerate(offers)
+        ]
         self.net_demand = self.net_demand[1:] + self.net_demand[:1]
         self.schedule = self.schedule[1:] + self.schedule[:1]
         return np.array([bids, offers], dtype=np.float32)
-
-
 
         # actions = ]
         #
@@ -171,30 +178,39 @@ class ProsumerAgent:
         x = np.array([bids, offers], dtype=np.float32)
         return x
 
-    def devise_strategy_smarter(self, obs: dict[str, np.ndarray], action_space: Box) -> np.ndarray:
+    def devise_strategy_smarter(
+        self, obs: dict[str, np.ndarray], action_space: Box
+    ) -> np.ndarray:
         """
         [ALTERNATIVE STRATEGY]
         Strategy: price-responsive flexible prosumer.
         Shifts flexible load to cheaper forecast hours and sets bid/offer prices relative to last known clearing price.
         """
-    
+
         # Observation breakdown: observe forecast prices for next 24h
-        # obs = [ND_i, P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1, P_f_1, ..., P_f_23]
         # last_price = obs[FORECAST_HORIZON]
-        last_price = obs["market_stats"][0]               # last market clearing price
+        last_price = obs["market_stats"][0]  # last market clearing price
         # forecast_prices = obs[FORECAST_HORIZON+4:]
         forecast_prices = obs["price_forecast"]
-        
-        forecast_prices = np.append(forecast_prices, forecast_prices[-1] * (1 + random.uniform(-0.1, 0.1)))
-            # np.array(obs[FORECAST_HORIZON:]))[:FORECAST_HORIZON]  # next 24h price forecast
+
+        forecast_prices = np.append(
+            forecast_prices, forecast_prices[-1] * (1 + random.uniform(-0.1, 0.1))
+        )
+        # np.array(obs[FORECAST_HORIZON:]))[:FORECAST_HORIZON]  # next 24h price forecast
 
         # First shift flexible load to low-price hours
         sorted_hours = np.argsort(forecast_prices)  # cheapest -> most expensive
         flex_load = self.flexible_load
-        new_schedule = np.array([sum([job[0] for job in self.load if job[1] == t]) for t in range(FORECAST_HORIZON)], dtype=float)
+        new_schedule = np.array(
+            [
+                sum([job[0] for job in self.load if job[1] == t])
+                for t in range(FORECAST_HORIZON)
+            ],
+            dtype=float,
+        )
 
         # Allocate flexible load to cheapest 25% of hours
-        cheap_hours = sorted_hours[:FORECAST_HORIZON // 4]
+        cheap_hours = sorted_hours[: FORECAST_HORIZON // 4]
         for h in cheap_hours:
             new_schedule[h] += flex_load / len(cheap_hours)
 
@@ -214,13 +230,13 @@ class ProsumerAgent:
             price_noise = 1 + random.uniform(-0.05, 0.05)
 
             if nd > 0:  # needs to buy
-                price = base_price * price_noise * (1 + 0.1 * (1.01)**(-nd))
+                price = base_price * price_noise * (1 + 0.1 * (1.01) ** (-nd))
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(nd, action_space.low[h, 1], action_space.high[h, 1])
                 bids[h] = [price, qty]
                 offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
-                price = base_price * price_noise * (1 - 0.1 * (0.99)**nd)
+                price = base_price * price_noise * (1 - 0.1 * (0.99) ** nd)
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
                 offers[h] = [price, qty]
@@ -230,17 +246,13 @@ class ProsumerAgent:
 
         return np.array([bids, offers], dtype=np.float32)
 
-
     def step(self):
         load = self.load
         new_load = [(job[0], job[1] - 1, job[2]) for job in load]
         self.load = new_load
         self.schedule = self.schedule[1:] + [0]
 
-
-
     def optimize_schedule(self, obs: np.ndarray) -> None:
-
         self.schedule = []
 
 
@@ -273,6 +285,7 @@ class AggressiveSellerAgent(ProsumerAgent):
         # offers = np.zeros((FORECAST_HORIZON, 2))
         # x = np.array([bids, offers], dtype=np.float32)
         # return x
+
 
 class AggressiveBuyerAgent(ProsumerAgent):
     """Aggressive buyer: buys to cover deficit at maximum price for all 24 hours."""
