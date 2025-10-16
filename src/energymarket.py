@@ -28,7 +28,7 @@ class MarketClearingAgent(ABC):
 
     @abstractmethod
     def clear_market(
-        self, bids_array: np.ndarray, offers_array: np.ndarray
+        self, bids_array: np.ndarray, offers_array: np.ndarray, debug=False
     ) -> MarketResult:
         pass
 
@@ -43,17 +43,13 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
 
     @override
     def clear_market(
-        self, bids_array: np.ndarray, offers_array: np.ndarray
+        self, bids_array: np.ndarray, offers_array: np.ndarray, debug=False
     ) -> MarketResult:
         """
-        Determines the market clearing price and quantity.
-
-        The algorithm finds the intersection point of the cumulative supply (offers) and demand (bids) curves.
-
-        bids_array and offers_array are assumed to be Nx3 arrays:
-        [Agent ID (0), Price (1), Quantity (2)]
+        Determines the market clearing price and quantity by finding the intersection
+        point of the aggregate supply and demand curves.
         """
-        # Check if arrays are empty
+        # Check for empty orders
         if bids_array.size == 0 or offers_array.size == 0:
             return 0.0, 0.0, []
 
@@ -64,39 +60,74 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
             or offers_array.shape[1] != 3
         ):
             raise ValueError(
-                f"Input arrays must be of shape (N, 3) ([Agent ID, Price, Quantity]). "
+                f"Input arrays must be of shape (N, 3). "
                 f"Received shapes: bids {bids_array.shape}, offers {offers_array.shape}."
             )
-        # Bids (Demand) sorted descending by price (highest price first)
+
+        # Build the demand and supply curves by sorting the orders.
+        # Demand curve steps from high to low prices.
         bids_sorted = bids_array[bids_array[:, 1].argsort()[::-1]]
-        # Offers (Supply) sorted ascending by price (lowest price first)
+        # Supply curve steps from low to high prices.
         offers_sorted = offers_array[offers_array[:, 1].argsort()]
 
-        # Extract prices and quantities
         bid_prices = bids_sorted[:, 1]
         bid_quantities = bids_sorted[:, 2]
         offer_prices = offers_sorted[:, 1]
         offer_quantities = offers_sorted[:, 2]
 
-        # Find the Marginal Match Index (k)
-        min_len = min(len(bid_prices), len(offer_prices))
-        match_indices = np.where(bid_prices[:min_len] >= offer_prices[:min_len])[0]
+        # Find the intersection quantity (max_trade_volume).
+        # We test every unique price as a potential clearing price to see where the
+        # trade volume is maximized. This is where the curves cross.
+        all_prices = np.unique(np.concatenate((bid_prices, offer_prices)))
 
-        if len(match_indices) == 0:
+        max_trade_volume = 0.0
+        # TODO: Is a hotfix, is in-efficient, can use prefix-sum
+        for price in all_prices:
+            # Quantity demanded at this price (all bids >= price)
+            demand_at_price = np.sum(bid_quantities[bid_prices >= price])
+            # Quantity supplied at this price (all offers <= price)
+            supply_at_price = np.sum(offer_quantities[offer_prices <= price])
+
+            # The amount that can actually trade is the minimum of the two
+            current_trade_volume = min(demand_at_price, supply_at_price)
+
+            # If this price allows for more trading, it's closer to the equilibrium
+            if current_trade_volume > max_trade_volume:
+                max_trade_volume = current_trade_volume
+
+        clearing_quantity = max_trade_volume
+
+        if clearing_quantity == 0:
             return 0.0, 0.0, []
 
-        k = match_indices[-1]
-        marginal_bid_price = bid_prices[k]
-        marginal_offer_price = offer_prices[k]
-        clearing_price = (marginal_bid_price + marginal_offer_price) / 2.0
-        bid_cumsum = np.cumsum(bid_quantities[: k + 1])
-        offer_cumsum = np.cumsum(offer_quantities[: k + 1])
-        clearing_quantity = min(bid_cumsum[-1], offer_cumsum[-1])
+        # STEP 3: Find the intersection price.
+        # The price is set by the marginal traders (the last buyer and seller
+        # needed to fulfill the clearing_quantity).
+        try:
+            # Find the lowest-priced bid that is part of the cleared quantity
+            bids_cum_q = np.cumsum(bid_quantities)
+            marginal_bid_idx = np.where(bids_cum_q >= clearing_quantity)[0][0]
+            marginal_bid_price = bid_prices[marginal_bid_idx]
 
-        # --- MODIFIED: Correctly calculate cleared participants ---
+            # Find the highest-priced offer that is part of the cleared quantity
+            offers_cum_q = np.cumsum(offer_quantities)
+            marginal_offer_idx = np.where(offers_cum_q >= clearing_quantity)[0][0]
+            marginal_offer_price = offer_prices[marginal_offer_idx]
+
+            # The clearing price is the midpoint (a common auction rule)
+            clearing_price = (marginal_bid_price + marginal_offer_price) / 2.0
+        except IndexError:
+            return 0.0, 0.0, []
+
+        debug and logger.debug(f"bids: {bids_sorted}")
+        debug and logger.debug(f"asks: {offers_sorted}")
+        debug and logger.debug(f"Clearing Price (Intersection Y): {clearing_price}")
+        debug and logger.debug(
+            f"Clearing Quantity (Intersection X): {clearing_quantity}"
+        )
+
+        # Calculate who gets what based on the intersection point
         cleared_participants: list[tuple[int, float]] = []
-
-        # Handle successful buyers
         buyers_cleared_qty = 0
         for agent_id, price, quantity in bids_sorted:
             if price >= clearing_price:
@@ -109,7 +140,6 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
             else:
                 break
 
-        # Handle successful sellers
         sellers_cleared_qty = 0
         for agent_id, price, quantity in offers_sorted:
             if price <= clearing_price:
@@ -121,6 +151,8 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
                 sellers_cleared_qty += trade_qty
             else:
                 break
+
+        debug and logger.debug(f"Cleared participants: {cleared_participants}")
 
         return (clearing_price, clearing_quantity, cleared_participants)
 
@@ -389,7 +421,7 @@ class DoubleAuctionEnv(Env):
         self.market_orders_history.append((bids_array.copy(), offers_array.copy()))
 
         clearing_price, clearing_quantity, cleared_participants = (
-            self.market_agent.clear_market(bids_array, offers_array)
+            self.market_agent.clear_market(bids_array, offers_array, debug=True)
         )
 
         reward = self._calculate_rewards(clearing_price, cleared_participants)
