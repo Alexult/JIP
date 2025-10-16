@@ -3,27 +3,26 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from prosumers import ProsumerAgent  # only to mirror attributes; we won’t call market logic
+from prosumers import ProsumerAgent  # Import to create actual prosumer instances
 
 # import national price data
 PRICE_CSV = os.path.join(os.path.dirname(__file__),
                          "..", "data", "representative_days_wholesale_price_2025.csv")
 
-# Same agents you already simulate in main.py
+# Agent configurations matching your main.py setup
 AGENT_CONFIGS = [
-    {"fixed_load": 10, "flexible_load_max": 8},
-    {"fixed_load": 18, "flexible_load_max": 7},
-    {"fixed_load": 12, "flexible_load_max": 6},
-    {"fixed_load": 34, "flexible_load_max": 9},
-    {"fixed_load": 19, "flexible_load_max": 5},
+    {"fixed_load": 10, "flexible_load_max": 8, "generation_capacity": 40, "generation_type": "solar"},
+    {"fixed_load": 18, "flexible_load_max": 7, "generation_capacity": 5,  "generation_type": "solar"},
+    {"fixed_load": 12, "flexible_load_max": 6, "generation_capacity": 0,  "generation_type": "none"},  # Consumer
+    {"fixed_load": 34, "flexible_load_max": 9, "generation_capacity": 18, "generation_type": "wind"},
+    {"fixed_load": 19, "flexible_load_max": 5, "generation_capacity": 0,  "generation_type": "none"},  # Consumer
 ]
 
-# Simple price-response: how strongly flexible load reacts to price (0..1)
-# 0.0 = no response; 1.0 = full curtailment of flexible load at/above hi threshold
-RESPONSE_STRENGTH = 0.8
+# Different response behaviors for consumers vs prosumers
+CONSUMER_RESPONSE_STRENGTH = 0.6  # Pure consumers are less aggressive at consumption redcution
+PROSUMER_RESPONSE_STRENGTH = 0.8  # Prosumers with generation can curtail more aggressively
 
-# We set low/high price thresholds from each day’s distribution
-# (this keeps it robust across very different days)
+# We set low/high price thresholds from each day's distribution
 LOW_PCTL  = 0.30
 HIGH_PCTL = 0.80
 
@@ -31,8 +30,6 @@ HIGH_PCTL = 0.80
 def load_four_days(csv_path: str) -> dict:
     """Return dict {day_str: DataFrame(hour, price)} for each calendar day in file."""
     df = pd.read_csv(csv_path)
-    # Expect columns exactly as you described:
-    # 'Datetime (Local)' and 'Price(EUR/MWhe)'
     ts_col = "Datetime (Local)"
     p_col  = "Price (EUR/MWhe)"
 
@@ -44,74 +41,271 @@ def load_four_days(csv_path: str) -> dict:
     days = {}
     for d, sub in df.groupby("day"):
         sub = sub.sort_values("hour")[[ "hour", p_col ]].reset_index(drop=True)
-        # sanity: must have 24 hourly rows
         if len(sub) != 24:
-            print(f"Warning: day {d} has {len(sub)} rows (expected 24). Using what’s available.")
+            print(f"Warning: day {d} has {len(sub)} rows (expected 24). Using what's available.")
         days[str(d)] = sub
     return days
 
 
 def build_prosumers_from_configs(configs):
-    """Create simple objects carrying fixed and flexible loads (no market behavior)."""
-    pros = []
+    """Create actual ProsumerAgent instances to get realistic demand patterns."""
+    agents = []
     for i, c in enumerate(configs):
-        # We only need fixed/flexible loads; avoid heavy init of ProsumerAgent (no data files).
-        class Simple:
-            pass
-        obj = Simple()
-        obj.agent_id = i
-        obj.fixed_load = float(c["fixed_load"])
-        obj.flexible_load_max = float(c["flexible_load_max"])
-        pros.append(obj)
-    return pros
+        # Create actual ProsumerAgent instance
+        agent = ProsumerAgent(
+            agent_id=i,
+            fixed_load=float(c["fixed_load"]),
+            flexible_load_max=float(c["flexible_load_max"]),
+            generation_capacity=float(c.get("generation_capacity", 0.0)),
+            generation_type=c.get("generation_type", "solar")
+        )
+        
+        # Add agent type based on generation capacity
+        if agent.generation_capacity > 0:
+            agent.agent_type = "prosumer"
+        else:
+            agent.agent_type = "consumer"
+        
+        agents.append(agent)
+    return agents
 
 
-def run_baseline_for_day(day_df: pd.DataFrame, prosumers: list) -> dict:
-    """Compute total energy cost if everyone buys at DA price,
-       with a very simple flexible-load response to high prices."""
-    price = day_df["Price (EUR/MWhe)"].to_numpy(dtype=float)  # length ~24
+def get_hourly_demand_data(agents: list, timestep_offset: int = 0) -> dict:
+    """
+    Get realistic hourly demand data for all agents using their calculate_net_demand method.
+    
+    Args:
+        agents: List of ProsumerAgent instances
+        timestep_offset: Starting timestep (for different days)
+    
+    Returns:
+        dict: Hourly data for each agent including flexible load, generation, etc.
+    """
+    hourly_data = {
+        'agents': [],
+        'total_flexible_used': [],
+        'total_generation': [],
+        'total_fixed': [],
+        'net_demands': []
+    }
+    
+    # Get data for 24 hours
+    for hour in range(24):
+        timestep = timestep_offset + hour
+        hour_flexible_used = 0.0
+        hour_generation = 0.0
+        hour_fixed = 0.0
+        hour_net_demands = []
+        
+        agent_hour_data = []
+        
+        for agent in agents:
+            agent.calculate_net_demand(timestep)  # ← This calculates realistic flexible load!
+            
+            # Extract components
+            if agent.generation_capacity > 0:
+                hour_of_day = timestep % 24
+                if agent.generation_type == "solar":
+                    effective_generation = agent._calc_solar_generation(hour_of_day)
+                else:  # wind
+                    effective_generation = agent._calc_wind_generation(hour_of_day)
+            else:
+                effective_generation = 0.0
+            
+            # Now reverse calculate with UPDATED net_demand
+            total_load = agent.net_demand + effective_generation
+            current_flexible_load = total_load - agent.fixed_load
+            
+            # Store agent data for this hour
+            agent_data = {
+                'agent_id': agent.agent_id,
+                'agent_type': agent.agent_type,
+                'fixed_load': agent.fixed_load,
+                'flexible_load_used': current_flexible_load,
+                'generation': effective_generation,
+                'net_demand': agent.net_demand
+            }
+            agent_hour_data.append(agent_data)
+            
+            # Accumulate totals
+            hour_flexible_used += current_flexible_load
+            hour_generation += effective_generation
+            hour_fixed += agent.fixed_load
+            hour_net_demands.append(agent.net_demand)
+        
+        hourly_data['agents'].append(agent_hour_data)
+        hourly_data['total_flexible_used'].append(hour_flexible_used)
+        hourly_data['total_generation'].append(hour_generation)
+        hourly_data['total_fixed'].append(hour_fixed)
+        hourly_data['net_demands'].append(hour_net_demands)
+    
+    return hourly_data
 
-    # thresholds based on this day
+
+def run_baseline_for_day(day_df: pd.DataFrame, agents: list, day_index: int = 0) -> dict:
+    """Compute total energy cost using realistic demand patterns with separate logic for buyers vs sellers."""
+    price = day_df["Price (EUR/MWhe)"].to_numpy(dtype=float)
+
+    # Calculate thresholds based on this day
     p_lo = np.percentile(price, LOW_PCTL * 100.0)
     p_hi = np.percentile(price, HIGH_PCTL * 100.0)
+
+    # Get realistic hourly demand data using prosumer logic
+    timestep_offset = day_index * 24  # Different starting point for each day
+    hourly_demand_data = get_hourly_demand_data(agents, timestep_offset)
 
     total_cost = 0.0
     total_fixed = 0.0
     total_flex_used = 0.0
     total_flex_curtailed = 0.0
+    total_generation = 0.0
+    total_generation_curtailed = 0.0
+    
+    # Enhanced tracking for consumers vs prosumers
+    consumer_metrics = {"cost": 0.0, "curtailed": 0.0, "used": 0.0, "count": 0}
+    prosumer_metrics = {"cost": 0.0, "curtailed": 0.0, "used": 0.0, "generation": 0.0, 
+                       "generation_curtailed": 0.0, "count": 0}
 
-    # For each hour, choose how much of each agent’s flexible load is used based on price
-    for h in range(len(price)):
-        p = price[h]
-
-        # price-to-response factor in [0,1]
-        # below p_lo -> 0 (no curtailment); above p_hi -> RESPONSE_STRENGTH (strong curtailment)
-        if p <= p_lo:
-            r = 0.0
-        elif p >= p_hi:
-            r = RESPONSE_STRENGTH
+    # Count agents by type
+    for ag in agents:
+        if ag.agent_type == "consumer":
+            consumer_metrics["count"] += 1
         else:
-            # linear ramp between low and high
-            r = RESPONSE_STRENGTH * (p - p_lo) / max(1e-9, (p_hi - p_lo))
+            prosumer_metrics["count"] += 1
 
+    # For each hour, apply different logic based on net buyer/seller status
+    for h in range(len(price)):
+        if h >= len(hourly_demand_data['agents']):
+            break
+            
+        p = price[h]
+        hour_agent_data = hourly_demand_data['agents'][h]
+        
         hour_fixed = 0.0
         hour_flex_used = 0.0
         hour_flex_curtailed = 0.0
+        hour_generation = 0.0
+        hour_generation_curtailed = 0.0
 
-        for ag in prosumers:
-            # fixed load is always consumed
-            hour_fixed += ag.fixed_load
-            # flexible: curtail a fraction r of the agent’s flexible max
-            curtailed = r * ag.flexible_load_max
-            used = ag.flexible_load_max - curtailed
-            hour_flex_used += used
-            hour_flex_curtailed += curtailed
+        for agent_data in hour_agent_data:
+            agent = agents[agent_data['agent_id']]
+            
+            # Use the realistic flexible load from prosumer calculation
+            realistic_flexible_load = agent_data['flexible_load_used']
+            baseline_generation = agent_data['generation']
+            
+            # Determine initial net demand (before any response)
+            initial_net_demand = (agent_data['fixed_load'] + realistic_flexible_load - 
+                                baseline_generation)
+            
+            # Initialize response variables
+            consumption_curtailed = 0.0
+            generation_curtailed = 0.0
+            
+            # SEPARATE LOGIC FOR NET BUYERS VS NET SELLERS
+            if initial_net_demand > 0:
+                # ===== NET BUYER LOGIC =====
+                # Agent needs to buy electricity from grid
+                
+                if agent.agent_type == "consumer":
+                    response_strength = CONSUMER_RESPONSE_STRENGTH
+                else:  # prosumer
+                    response_strength = PROSUMER_RESPONSE_STRENGTH
+                
+                # High prices → reduce consumption
+                if p <= p_lo:
+                    r_consumption = 0.0
+                elif p >= p_hi:
+                    r_consumption = response_strength
+                else:
+                    r_consumption = response_strength * (p - p_lo) / max(1e-9, (p_hi - p_lo))
+                
+                consumption_curtailed = r_consumption * realistic_flexible_load
+                
+                # Prosumers might also increase generation slightly at high prices
+                if agent.agent_type == "prosumer" and baseline_generation > 0 and p >= p_hi:
+                    # Don't curtail generation when prices are high (actually produce more if possible)
+                    generation_curtailed = 0.0
+                
+            else:
+                # ===== NET SELLER LOGIC =====
+                # Agent has surplus to sell to grid
+                
+                if agent.agent_type == "prosumer":
+                    # High prices → want to sell more (reduce own consumption, maintain generation)
+                    if p >= p_hi:
+                        # Very high prices: reduce consumption more aggressively to sell more
+                        r_consumption = PROSUMER_RESPONSE_STRENGTH * 1.2  # Even more aggressive
+                        consumption_curtailed = min(r_consumption * realistic_flexible_load, 
+                                                  realistic_flexible_load * 0.9)  # Max 90% reduction
+                        generation_curtailed = 0.0  # Don't curtail generation at high prices
+                        
+                    elif p <= p_lo:
+                        # Low prices → less incentive to sell
+                        # Maybe curtail some generation or consume more
+                        r_consumption = -0.1  # Actually increase consumption by 10%
+                        consumption_curtailed = r_consumption * realistic_flexible_load  # Negative = increase
+                        
+                        # Curtail some generation at very low prices
+                        if baseline_generation > 0:
+                            generation_curtailed = 0.15 * baseline_generation  # Curtail 15% of generation
+                    else:
+                        # Medium prices → no special response
+                        consumption_curtailed = 0.0
+                        generation_curtailed = 0.0
+                else:
+                    # This shouldn't happen (consumers can't be net sellers with zero generation)
+                    consumption_curtailed = 0.0
+                    generation_curtailed = 0.0
+            
+            # Apply the responses
+            if consumption_curtailed >= 0:
+                used_flexible = realistic_flexible_load - consumption_curtailed
+                curtailed_flexible = consumption_curtailed
+            else:
+                # Negative curtailment = increased consumption
+                used_flexible = realistic_flexible_load + abs(consumption_curtailed)
+                curtailed_flexible = consumption_curtailed  # Keep negative for tracking
+            
+            actual_generation = baseline_generation - generation_curtailed
+            
+            # Fixed load and totals
+            hour_fixed += agent_data['fixed_load']
+            hour_flex_used += used_flexible
+            hour_flex_curtailed += curtailed_flexible
+            hour_generation += actual_generation
+            hour_generation_curtailed += generation_curtailed
+            
+            # Calculate final net demand and cost for this agent
+            agent_net_demand = agent_data['fixed_load'] + used_flexible - actual_generation
+            
+            # Cost calculation
+            if agent_net_demand > 0:
+                # Net buyer pays for electricity
+                agent_cost = agent_net_demand * p
+            else:
+                # Net seller receives payment (negative cost)
+                agent_cost = agent_net_demand * p  # This will be negative (revenue)
+            
+            # Track metrics by agent type
+            if agent.agent_type == "consumer":
+                consumer_metrics["cost"] += agent_cost
+                consumer_metrics["curtailed"] += max(0, curtailed_flexible)  # Only positive curtailment
+                consumer_metrics["used"] += used_flexible
+            else:
+                prosumer_metrics["cost"] += agent_cost
+                prosumer_metrics["curtailed"] += max(0, curtailed_flexible)  # Only positive curtailment
+                prosumer_metrics["used"] += used_flexible
+                prosumer_metrics["generation"] += actual_generation
+                prosumer_metrics["generation_curtailed"] += generation_curtailed
 
-        hourly_demand = hour_fixed + hour_flex_used  # MWh (units consistent with your loads)
-        total_cost += hourly_demand * p
         total_fixed += hour_fixed
         total_flex_used += hour_flex_used
         total_flex_curtailed += hour_flex_curtailed
+        total_generation += hour_generation
+        total_generation_curtailed += hour_generation_curtailed
+    # Calculate total system cost (sum of all agent costs, including negative for sellers)
+    total_cost = consumer_metrics["cost"] + prosumer_metrics["cost"]
 
     avg_price = float(np.mean(price))
     peak_price = float(np.max(price))
@@ -122,179 +316,156 @@ def run_baseline_for_day(day_df: pd.DataFrame, prosumers: list) -> dict:
         "energy_fixed_MWh": total_fixed,
         "energy_flex_used_MWh": total_flex_used,
         "energy_flex_curtailed_MWh": total_flex_curtailed,
+        "energy_generation_MWh": total_generation,
+        "energy_generation_curtailed_MWh": total_generation_curtailed,
         "total_energy_MWh": total_fixed + total_flex_used,
+        "net_energy_MWh": total_fixed + total_flex_used - total_generation,
         "total_cost_eur": total_cost,
-        "curtailment_share_%": 100.0 * total_flex_curtailed / max(1e-9, (total_fixed + total_flex_used + total_flex_curtailed)),
+        "curtailment_share_%": 100.0 * max(0, total_flex_curtailed) / max(1e-9, (total_fixed + total_flex_used + max(0, total_flex_curtailed))),
         "hi_threshold": p_hi,
         "lo_threshold": p_lo,
+        # Enhanced metrics
+        "consumer_cost_eur": consumer_metrics["cost"],
+        "consumer_curtailment_MWh": consumer_metrics["curtailed"],
+        "consumer_count": consumer_metrics["count"],
+        "prosumer_cost_eur": prosumer_metrics["cost"],
+        "prosumer_curtailment_MWh": prosumer_metrics["curtailed"],
+        "prosumer_generation_MWh": prosumer_metrics["generation"],
+        "prosumer_generation_curtailed_MWh": prosumer_metrics["generation_curtailed"],
+        "prosumer_count": prosumer_metrics["count"],
+        "hourly_demand_data": hourly_demand_data,
     }
-
-def plot_day_comparison(days: dict, prosumers: list):
-    """Create comprehensive comparison plots for the four representative days."""
+def plot_day_comparison(days: dict, agents: list):
+    """Create comprehensive comparison plots using realistic demand patterns."""
     
     # Collect data for all days
     day_names = list(days.keys())
     all_metrics = {}
-    hourly_data = {}
     
-    for day, df in days.items():
-        metrics = run_baseline_for_day(df, prosumers)
+    for day_index, (day, df) in enumerate(days.items()):
+        metrics = run_baseline_for_day(df, agents, day_index)
         all_metrics[day] = metrics
-        
-        # Store hourly prices and demands for detailed plots
-        price = df["Price (EUR/MWhe)"].to_numpy(dtype=float)
-        p_lo = np.percentile(price, LOW_PCTL * 100.0)
-        p_hi = np.percentile(price, HIGH_PCTL * 100.0)
-        
-        # Calculate hourly demand profile
-        hourly_demand = []
-        hourly_curtailment = []
-        
-        for h in range(len(price)):
-            p = price[h]
-            if p <= p_lo:
-                r = 0.0
-            elif p >= p_hi:
-                r = RESPONSE_STRENGTH
-            else:
-                r = RESPONSE_STRENGTH * (p - p_lo) / max(1e-9, (p_hi - p_lo))
-            
-            hour_total_demand = 0.0
-            hour_curtailed = 0.0
-            for ag in prosumers:
-                hour_total_demand += ag.fixed_load + ag.flexible_load_max * (1 - r)
-                hour_curtailed += ag.flexible_load_max * r
-            
-            hourly_demand.append(hour_total_demand)
-            hourly_curtailment.append(hour_curtailed)
-        
-        hourly_data[day] = {
-            'price': price,
-            'demand': hourly_demand,
-            'curtailment': hourly_curtailment,
-            'p_lo': p_lo,
-            'p_hi': p_hi
-        }
     
-    # Create subplot layout with better spacing
-    fig, axes = plt.subplots(2, 3, figsize=(20, 14))  # Increased figure size
-    #fig.suptitle('Baseline Market Analysis: Four Representative Days', 
-                 #fontsize=18, fontweight='bold', y=0.98)  # Moved title higher
+    # Create enhanced plots
+    fig, axes = plt.subplots(2, 3, figsize=(20, 14))
     
-    # Plot 1: Hourly prices for all days
+    # Plot 1: Hourly prices
     ax1 = axes[0, 0]
     for day in day_names:
-        ax1.plot(range(24), hourly_data[day]['price'], label=f"{day}", linewidth=2, marker='o', markersize=4)
-        # Add threshold lines
-        ax1.axhline(y=hourly_data[day]['p_lo'], color='gray', linestyle='--', alpha=0.5)
-        ax1.axhline(y=hourly_data[day]['p_hi'], color='gray', linestyle='--', alpha=0.5)
+        df = days[day]
+        price = df["Price (EUR/MWhe)"].to_numpy(dtype=float)
+        ax1.plot(range(24), price, label=f"{day}", linewidth=2, marker='o', markersize=4)
     
-    ax1.set_title('Hourly Electricity Prices', fontsize=12, pad=15)  # Added padding
+    ax1.set_title('Hourly Electricity Prices', fontsize=12, pad=15)
     ax1.set_xlabel('Hour of Day', fontsize=10)
     ax1.set_ylabel('Price (€/MWh)', fontsize=10)
     ax1.legend(fontsize=9)
     ax1.grid(True, alpha=0.3)
     
-    # Plot 2: Hourly demand profiles
+    # Plot 2: Realistic flexible load patterns
     ax2 = axes[0, 1]
     for day in day_names:
-        ax2.plot(range(24), hourly_data[day]['demand'], label=f"{day}", linewidth=2, marker='s', markersize=4)
+        hourly_data = all_metrics[day]['hourly_demand_data']
+        flexible_loads = []
+        for hour_data in hourly_data['agents']:
+            hour_total_flexible = sum([agent['flexible_load_used'] for agent in hour_data])
+            flexible_loads.append(hour_total_flexible)
+        ax2.plot(range(24), flexible_loads, label=f"{day} Flexible Load", linewidth=2, marker='s')
     
-    ax2.set_title('Hourly Energy Demand (After Curtailment)', fontsize=12, pad=15)
+    ax2.set_title('Realistic Hourly Flexible Load Patterns', fontsize=12, pad=15)
     ax2.set_xlabel('Hour of Day', fontsize=10)
-    ax2.set_ylabel('Demand (MWh)', fontsize=10)
+    ax2.set_ylabel('Flexible Load (MWh)', fontsize=10)
     ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
     
-    # Plot 3: Hourly curtailment
+    # Plot 3: Generation vs Demand
     ax3 = axes[0, 2]
     for day in day_names:
-        ax3.plot(range(24), hourly_data[day]['curtailment'], label=f"{day}", linewidth=2, marker='^', markersize=4)
+        hourly_data = all_metrics[day]['hourly_demand_data']
+        total_demands = []
+        total_generations = []
+        for hour_data in hourly_data['agents']:
+            hour_demand = sum([agent['fixed_load'] + agent['flexible_load_used'] for agent in hour_data])
+            hour_gen = sum([agent['generation'] for agent in hour_data])
+            total_demands.append(hour_demand)
+            total_generations.append(hour_gen)
+        
+        ax3.plot(range(24), total_demands, label=f"{day} Demand", linewidth=2, linestyle='-')
+        ax3.plot(range(24), total_generations, label=f"{day} Generation", linewidth=2, linestyle='--')
     
-    ax3.set_title('Hourly Load Curtailment', fontsize=12, pad=15)
+    ax3.set_title('Hourly Demand vs Generation', fontsize=12, pad=15)
     ax3.set_xlabel('Hour of Day', fontsize=10)
-    ax3.set_ylabel('Curtailed Load (MWh)', fontsize=10)
-    ax3.legend(fontsize=9)
+    ax3.set_ylabel('Energy (MWh)', fontsize=10)
+    ax3.legend(fontsize=8)
     ax3.grid(True, alpha=0.3)
     
-    # Plot 4: Daily summary metrics - Energy
+    # Plot 4: Cost breakdown by agent type
     ax4 = axes[1, 0]
-    metrics_names = ['energy_fixed_MWh', 'energy_flex_used_MWh', 'energy_flex_curtailed_MWh']
-    metrics_labels = ['Fixed Load', 'Flexible Used', 'Curtailed']
-    colors = ['#1f77b4', '#ff7f0e', '#d62728']
-    
     x = np.arange(len(day_names))
-    width = 0.25
+    width = 0.35
     
-    for i, (metric, label, color) in enumerate(zip(metrics_names, metrics_labels, colors)):
-        values = [all_metrics[day][metric] for day in day_names]
-        ax4.bar(x + i*width, values, width, label=label, color=color, alpha=0.8)
+    consumer_costs = [all_metrics[day]['consumer_cost_eur'] for day in day_names]
+    prosumer_costs = [all_metrics[day]['prosumer_cost_eur'] for day in day_names]
     
-    ax4.set_title('Daily Energy Consumption Breakdown', fontsize=12, pad=15)
+    ax4.bar(x - width/2, consumer_costs, width, label='Consumers', color='#ff7f0e', alpha=0.8)
+    ax4.bar(x + width/2, prosumer_costs, width, label='Prosumers', color='#2ca02c', alpha=0.8)
+    
+    ax4.set_title('Daily Costs by Agent Type', fontsize=12, pad=15)
     ax4.set_xlabel('Representative Days', fontsize=10)
-    ax4.set_ylabel('Energy (MWh)', fontsize=10)
-    ax4.set_xticks(x + width)
+    ax4.set_ylabel('Cost (€)', fontsize=10)
+    ax4.set_xticks(x)
     ax4.set_xticklabels(day_names, rotation=45, fontsize=9)
     ax4.legend(fontsize=9)
     ax4.grid(True, alpha=0.3, axis='y')
     
-    # Plot 5: Cost and price metrics
+    # Plot 5: Energy balance
     ax5 = axes[1, 1]
-    total_costs = [all_metrics[day]['total_cost_eur'] for day in day_names]
-    avg_prices = [all_metrics[day]['avg_price_eur_mwh'] for day in day_names]
+    total_demand = [all_metrics[day]['total_energy_MWh'] for day in day_names]
+    total_generation = [all_metrics[day]['energy_generation_MWh'] for day in day_names]
+    net_energy = [all_metrics[day]['net_energy_MWh'] for day in day_names]
     
-    ax5_twin = ax5.twinx()
+    ax5.bar(x - 0.25, total_demand, 0.25, label='Total Demand', color='#d62728', alpha=0.8)
+    ax5.bar(x, total_generation, 0.25, label='Generation', color='#2ca02c', alpha=0.8)
+    ax5.bar(x + 0.25, net_energy, 0.25, label='Net Demand', color='#1f77b4', alpha=0.8)
     
-    bars1 = ax5.bar(x - 0.2, total_costs, 0.4, label='Total Cost', color='#2ca02c', alpha=0.8)
-    line1 = ax5_twin.plot(x, avg_prices, 'ro-', linewidth=2, markersize=8, label='Avg Price')
-    
-    ax5.set_title('Daily Costs vs Average Prices', fontsize=12, pad=15)
+    ax5.set_title('Daily Energy Balance (Realistic Patterns)', fontsize=12, pad=15)
     ax5.set_xlabel('Representative Days', fontsize=10)
-    ax5.set_ylabel('Total Cost (€)', color='#2ca02c', fontsize=10)
-    ax5_twin.set_ylabel('Average Price (€/MWh)', color='red', fontsize=10)
+    ax5.set_ylabel('Energy (MWh)', fontsize=10)
     ax5.set_xticks(x)
     ax5.set_xticklabels(day_names, rotation=45, fontsize=9)
+    ax5.legend(fontsize=9)
     ax5.grid(True, alpha=0.3, axis='y')
     
-    # Plot 6: Curtailment percentages
+    # Plot 6: Response comparison
     ax6 = axes[1, 2]
-    curtailment_pcts = [all_metrics[day]['curtailment_share_%'] for day in day_names]
-    peak_prices = [all_metrics[day]['peak_price_eur_mwh'] for day in day_names]
+    consumer_curtailment = [all_metrics[day]['consumer_curtailment_MWh'] for day in day_names]
+    prosumer_curtailment = [all_metrics[day]['prosumer_curtailment_MWh'] for day in day_names]
     
-    bars2 = ax6.bar(x, curtailment_pcts, color='#ff7f0e', alpha=0.8, label='Curtailment %')
-    ax6_twin = ax6.twinx()
-    line2 = ax6_twin.plot(x, peak_prices, 'bs-', linewidth=2, markersize=8, label='Peak Price')
+    ax6.bar(x - width/2, consumer_curtailment, width, label='Consumer Load Reduction', color='#ff7f0e', alpha=0.8)
+    ax6.bar(x + width/2, prosumer_curtailment, width, label='Prosumer Load Reduction', color='#2ca02c', alpha=0.8)
     
-    ax6.set_title('Curtailment vs Peak Prices', fontsize=12, pad=15)
+    ax6.set_title('Daily Load Reduction by Agent Type', fontsize=12, pad=15)
     ax6.set_xlabel('Representative Days', fontsize=10)
-    ax6.set_ylabel('Curtailment (%)', color='#ff7f0e', fontsize=10)
-    ax6_twin.set_ylabel('Peak Price (€/MWh)', color='blue', fontsize=10)
+    ax6.set_ylabel('Reduced Load (MWh)', fontsize=10)
     ax6.set_xticks(x)
     ax6.set_xticklabels(day_names, rotation=45, fontsize=9)
+    ax6.legend(fontsize=9)
     ax6.grid(True, alpha=0.3, axis='y')
     
-    # Adjust spacing between subplots
-    plt.subplots_adjust(
-        top=0.93,       # Space for main title
-        bottom=0.08,    # Space for x-axis labels
-        left=0.06,      # Left margin
-        right=0.95,     # Right margin
-        hspace=0.35,    # Height spacing between rows
-        wspace=0.25     # Width spacing between columns
-    )
-    
+    plt.subplots_adjust(top=0.93, bottom=0.08, left=0.06, right=0.95, hspace=0.35, wspace=0.25)
     plt.show()
     
-    # Print summary table
-    print("\n=== Summary Comparison Table ===")
-    print(f"{'Day':<12} {'Avg Price':<10} {'Peak Price':<11} {'Total Cost':<11} {'Curtailment':<12} {'Energy Used':<12}")
-    print(f"{'':12} {'(€/MWh)':<10} {'(€/MWh)':<11} {'(€)':<11} {'(%)':<12} {'(MWh)':<12}")
-    print("-" * 80)
+    # Enhanced summary table
+    print("\n=== Enhanced Summary: Realistic Demand Patterns ===")
+    print(f"{'Day':<12} {'Total Cost':<11} {'Consumer Cost':<13} {'Prosumer Cost':<13} {'Generation':<11} {'Net Demand':<11}")
+    print(f"{'':12} {'(€)':<11} {'(€)':<13} {'(€)':<13} {'(MWh)':<11} {'(MWh)':<11}")
+    print("-" * 90)
     
     for day in day_names:
         m = all_metrics[day]
-        print(f"{day:<12} {m['avg_price_eur_mwh']:<10.2f} {m['peak_price_eur_mwh']:<11.2f} "
-              f"{m['total_cost_eur']:<11.2f} {m['curtailment_share_%']:<12.1f} {m['total_energy_MWh']:<12.2f}")
+        print(f"{day:<12} {m['total_cost_eur']:<11.2f} {m['consumer_cost_eur']:<13.2f} "
+              f"{m['prosumer_cost_eur']:<13.2f} {m['energy_generation_MWh']:<11.2f} {m['net_energy_MWh']:<11.2f}")
+
 
 def main():
     # 1) load the four days
@@ -302,31 +473,29 @@ def main():
     if not days:
         raise RuntimeError("No days found in the price CSV.")
 
-    # 2) build prosumers (pull fixed/flexible from the same configs as your ABM)
-    prosumers = build_prosumers_from_configs(AGENT_CONFIGS)
+    # 2) build actual prosumer agents (with realistic demand patterns)
+    agents = build_prosumers_from_configs(AGENT_CONFIGS)
 
-    # 3) run four independent scenarios
-    print("\n=== Baseline (No LEM, DA price only) — Four-Day Scenarios ===")
-    for day, df in days.items():
-        metrics = run_baseline_for_day(df, prosumers)
+    # 3) Print agent summary
+    print("\n=== Agent Configuration Summary ===")
+    for ag in agents:
+        print(f"Agent {ag.agent_id}: {ag.agent_type}, Fixed: {ag.fixed_load} MWh, "
+              f"Flexible Max: {ag.flexible_load_max} MWh, Generation: {ag.generation_capacity} MWh ({ag.generation_type})")
+
+    # 4) run four independent scenarios with realistic demand
+    for day_index, (day, df) in enumerate(days.items()):
+        metrics = run_baseline_for_day(df, agents, day_index)
         print(f"\nDay {day}")
-        print(f"  Avg price       : {metrics['avg_price_eur_mwh']:.2f} €/MWh")
-        print(f"  Peak price      : {metrics['peak_price_eur_mwh']:.2f} €/MWh")
-        print(f"  Energy fixed    : {metrics['energy_fixed_MWh']:.2f} MWh")
-        print(f"  Energy flex used: {metrics['energy_flex_used_MWh']:.2f} MWh")
-        print(f"  Energy curtailed: {metrics['energy_flex_curtailed_MWh']:.2f} MWh "
-              f"({metrics['curtailment_share_%']:.1f}%)")
-        print(f"  Total energy    : {metrics['total_energy_MWh']:.2f} MWh")
-        print(f"  Total cost      : € {metrics['total_cost_eur']:.2f}")
-        print(f"  Thresholds      : lo={metrics['lo_threshold']:.2f}, hi={metrics['hi_threshold']:.2f} €/MWh")
+        print(f"  Total cost         : € {metrics['total_cost_eur']:.2f}")
+        print(f"  Consumer cost      : € {metrics['consumer_cost_eur']:.2f} ({metrics['consumer_count']} agents)")
+        print(f"  Prosumer cost      : € {metrics['prosumer_cost_eur']:.2f} ({metrics['prosumer_count']} agents)")
+        print(f"  Total generation   : {metrics['energy_generation_MWh']:.2f} MWh")
+        print(f"  Net demand         : {metrics['net_energy_MWh']:.2f} MWh")
+        print(f"  Curtailment        : {metrics['curtailment_share_%']:.1f}%")
 
-    # 4) Create comprehensive comparison plots
-    plot_day_comparison(days, prosumers)
-
+    # 5) Create comprehensive comparison plots
+    plot_day_comparison(days, agents)
 
 
 if __name__ == "__main__":
     main()
-
-
-
