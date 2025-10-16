@@ -93,7 +93,19 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         offer_cumsum = np.cumsum(offer_quantities[: k + 1])
         clearing_quantity = min(bid_cumsum[-1], offer_cumsum[-1])
 
-        return clearing_price, clearing_quantity
+
+        # bought_energy = {}
+        #
+        # quantity = 0
+        # i = 0
+        # while quantity < clearing_quantity:
+        #
+        #     bids = np.where(bids_array[0] = bid_prices[i])
+        #
+        #     i += 1
+
+        return (clearing_price, clearing_quantity)
+                    # , bought_energy)
 
 
 class DoubleAuctionEnv(Env):
@@ -209,6 +221,9 @@ class DoubleAuctionEnv(Env):
         NOTE: This forecast uses the agents' *current* net_demand to interpret
         their future bids/offers. It does not simulate changes in their demand.
         """
+        # if self.current_timestep == 0:
+        #     return 5 * np.ones(FORECAST_HORIZON, dtype=np.float32)
+
         forecasted_prices = []
         for h in range(1, self.FORECAST_HORIZON):  # Iterate from hour t+1 to t+23
             future_bids, future_offers = [], []
@@ -282,7 +297,7 @@ class DoubleAuctionEnv(Env):
             agent.profit = 0.0
 
         # Initial forecast is zero
-        initial_forecast = [0.0] * (self.FORECAST_HORIZON - 1)
+        initial_forecast = [5.0] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info
