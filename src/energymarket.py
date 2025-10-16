@@ -28,7 +28,7 @@ class MarketClearingAgent(ABC):
 
     @abstractmethod
     def clear_market(
-            self, bids_array: np.ndarray, offers_array: np.ndarray
+        self, bids_array: np.ndarray, offers_array: np.ndarray
     ) -> MarketResult:
         pass
 
@@ -43,7 +43,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
 
     @override
     def clear_market(
-            self, bids_array: np.ndarray, offers_array: np.ndarray
+        self, bids_array: np.ndarray, offers_array: np.ndarray
     ) -> MarketResult:
         """
         Determines the market clearing price and quantity.
@@ -55,13 +55,13 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         """
         # Check if arrays are empty
         if bids_array.size == 0 or offers_array.size == 0:
-            return 0.0, 0.0
+            return 0.0, 0.0,[]
 
         if (
-                bids_array.ndim != 2
-                or bids_array.shape[1] != 3
-                or offers_array.ndim != 2
-                or offers_array.shape[1] != 3
+            bids_array.ndim != 2
+            or bids_array.shape[1] != 3
+            or offers_array.ndim != 2
+            or offers_array.shape[1] != 3
         ):
             raise ValueError(
                 f"Input arrays must be of shape (N, 3) ([Agent ID, Price, Quantity]). "
@@ -83,7 +83,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         match_indices = np.where(bid_prices[:min_len] >= offer_prices[:min_len])[0]
 
         if len(match_indices) == 0:
-            return 0.0, 0.0
+            return 0.0, 0.0, []
 
         k = match_indices[-1]
         marginal_bid_price = bid_prices[k]
@@ -92,20 +92,19 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         bid_cumsum = np.cumsum(bid_quantities[: k + 1])
         offer_cumsum = np.cumsum(offer_quantities[: k + 1])
         clearing_quantity = min(bid_cumsum[-1], offer_cumsum[-1])
+        cleared_participants: list[tuple[int,float]] = []
+        tmp_qty = clearing_quantity
+        for agent in bids_sorted:
+            if agent[1] > clearing_price:
+                break
+            elif tmp_qty == 0:
+                break
+            cleared_participants.append((agent[0],min(tmp_qty,agent[2])))
+            tmp_qty = max(0,tmp_qty-agent[2])
 
 
-        # bought_energy = {}
-        #
-        # quantity = 0
-        # i = 0
-        # while quantity < clearing_quantity:
-        #
-        #     bids = np.where(bids_array[0] = bid_prices[i])
-        #
-        #     i += 1
-
-        return (clearing_price, clearing_quantity)
-                    # , bought_energy)
+        return (clearing_price, clearing_quantity, cleared_participants)
+        # , bought_energy)
 
 
 class DoubleAuctionEnv(Env):
@@ -118,10 +117,10 @@ class DoubleAuctionEnv(Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
     def __init__(
-            self,
-            agent_configs: list[dict[str, Any]],
-            market_clearing_agent: MarketClearingAgent,
-            max_timesteps: int = 100,
+        self,
+        agent_configs: list[dict[str, Any]],
+        market_clearing_agent: MarketClearingAgent,
+        max_timesteps: int = 100,
     ):
         super().__init__()
 
@@ -156,7 +155,7 @@ class DoubleAuctionEnv(Env):
                     generation_capacity=config["generation_capacity"],
                     generation_type=config["generation_type"]
                     if "generation_type" in config
-                       and config["generation_type"] is not None
+                    and config["generation_type"] is not None
                     else "solar",
                 )
             )
@@ -180,9 +179,7 @@ class DoubleAuctionEnv(Env):
         # Obs: [ND_i] + [Market_Stats (4)] + [Price_Forecast (23)]
 
         # This section is crazy and idk what it does
-        MAX_DEMAND_ABS = max(
-            max(c.schedule) for c in self.agents
-        )
+        MAX_DEMAND_ABS = max(max(c.schedule) for c in self.agents)
         MAX_CAPACITY = max(c["generation_capacity"] for c in agent_configs)
         MAX_NET_DEMAND = MAX_DEMAND_ABS
         MIN_NET_DEMAND = -MAX_CAPACITY
@@ -246,7 +243,7 @@ class DoubleAuctionEnv(Env):
                 np.array(future_offers, dtype=float) if future_offers else np.array([])
             )
 
-            price, _ = self.market_agent.clear_market(bids_arr, offers_arr)
+            price, _,_ = self.market_agent.clear_market(bids_arr, offers_arr)
             forecasted_prices.append(price)
 
         return forecasted_prices
@@ -267,16 +264,30 @@ class DoubleAuctionEnv(Env):
 
         return observations
 
-    def _calculate_rewards(self, clearing_price: float) -> dict[int, float]:
+    def _calculate_rewards(self, clearing_price: float,cleared_participants:list[tuple[int,float]]) -> dict[int, float]:
         """Calculates the reward (profit) for all agents for the current timestep."""
+        def find_index(lst, value):
+            try:
+                return lst.index(value)
+            except ValueError:
+                return None
         rewards: dict[int, float] = {}
+        cleared_agent_ids= [x[0] for x in cleared_participants]
         for agent in self.agents:
-            rewards[agent.agent_id] = agent.calculate_profit(clearing_price)
+            rewards[agent.agent_id] = 0
+            # NOTE: Not efficient, but I'm lazy and who cares about blazingly fast performance in python
+            # if agent.agent_id in cleared_agent_ids:
+            #     rewards[agent.agent_id]=agent.calculate_profit(clearing_price,)
+            idx = find_index(cleared_agent_ids,agent.agent_id)
+            if idx:
+                rewards[agent.agent_id]=agent.calculate_profit(clearing_price, cleared_participants[idx][1])
+        # for agent in cleared_participants:
+        #     rewards[agent[0]]=agent.calculate_profit(clearing_price)
         return rewards
 
     @override
     def reset(
-            self, seed: int | None = None, options: dict[str, Any] | None = None
+        self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[int, np.ndarray], dict[str, Any]]:
         """Resets the environment."""
         super().reset(seed=seed)
@@ -304,7 +315,7 @@ class DoubleAuctionEnv(Env):
         return observation, info
 
     def step(
-            self, actions: dict[int, np.ndarray]
+        self, actions: dict[int, np.ndarray]
     ) -> tuple[
         dict[int, np.ndarray],
         dict[int, float],
@@ -342,12 +353,12 @@ class DoubleAuctionEnv(Env):
         offers_array = np.array(all_offers, dtype=float) if all_offers else np.array([])
         self.market_orders_history.append((bids_array.copy(), offers_array.copy()))
 
-        clearing_price, clearing_quantity = self.market_agent.clear_market(
+        clearing_price, clearing_quantity,cleared_participants = self.market_agent.clear_market(
             bids_array, offers_array
         )
 
         # Calculate Rewards based on CURRENT HOUR's outcome
-        reward = self._calculate_rewards(clearing_price)
+        reward = self._calculate_rewards(clearing_price,cleared_participants)
 
         # Generate Price Forecast for the NEXT 23 HOURS
         price_forecast = self._forecast_prices(actions)
