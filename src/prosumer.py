@@ -211,13 +211,13 @@ class ProsumerAgent:
             price_noise = 1 + random.uniform(-0.05, 0.05)
 
             if nd > 0:  # needs to buy
-                price = base_price * 1.05 * price_noise
+                price = base_price * price_noise * (1 + 0.1 * (1.01)**(-nd))
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(nd, action_space.low[h, 1], action_space.high[h, 1])
                 bids[h] = [price, qty]
                 offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
-                price = base_price * 0.95 * price_noise
+                price = base_price * price_noise * (1 - 0.1 * (0.99)**nd)
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
                 offers[h] = [price, qty]
