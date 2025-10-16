@@ -2,7 +2,7 @@ from typing import override, Any
 import numpy as np
 from custom_types import *
 from gymnasium import Env
-from gymnasium.spaces import Box
+from gymnasium.spaces import Box, Dict
 from abc import ABC, abstractmethod
 from prosumer import *
 import matplotlib.pyplot as plt
@@ -92,16 +92,35 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         bid_cumsum = np.cumsum(bid_quantities[: k + 1])
         offer_cumsum = np.cumsum(offer_quantities[: k + 1])
         clearing_quantity = min(bid_cumsum[-1], offer_cumsum[-1])
-        cleared_participants: list[tuple[int,float]] = []
-        tmp_qty = clearing_quantity
-        for agent in bids_sorted:
-            if agent[1] > clearing_price:
-                break
-            elif tmp_qty == 0:
-                break
-            cleared_participants.append((agent[0],min(tmp_qty,agent[2])))
-            tmp_qty = max(0,tmp_qty-agent[2])
 
+        # --- MODIFIED: Correctly calculate cleared participants ---
+        cleared_participants: list[tuple[int, float]] = []
+
+        # Handle successful buyers
+        buyers_cleared_qty = 0
+        for agent_id, price, quantity in bids_sorted:
+            if price >= clearing_price:
+                remaining_market_qty = clearing_quantity - buyers_cleared_qty
+                if remaining_market_qty <= 0:
+                    break
+                trade_qty = min(quantity, remaining_market_qty)
+                cleared_participants.append((int(agent_id), trade_qty))
+                buyers_cleared_qty += trade_qty
+            else:
+                break
+
+        # Handle successful sellers
+        sellers_cleared_qty = 0
+        for agent_id, price, quantity in offers_sorted:
+            if price <= clearing_price:
+                remaining_market_qty = clearing_quantity - sellers_cleared_qty
+                if remaining_market_qty <= 0:
+                    break
+                trade_qty = min(quantity, remaining_market_qty)
+                cleared_participants.append((int(agent_id), trade_qty))
+                sellers_cleared_qty += trade_qty
+            else:
+                break
 
         return (clearing_price, clearing_quantity, cleared_participants)
 
@@ -131,11 +150,15 @@ class DoubleAuctionEnv(Env):
         self.current_timestep = 0
         self.FORECAST_HORIZON = 24
 
-        # Public Market Stats for Observation (P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1)
+        # Public Market Stats
         self.last_clearing_price = 5.0
         self.last_clearing_quantity = 0.0
         self.last_total_bids_qty = 0.0
         self.last_total_offers_qty = 0.0
+        # --- NEW: Track last cleared quantity per agent ---
+        self.last_cleared_quantities: dict[int, float] = {
+            i: 0.0 for i in self.agent_ids
+        }
 
         self.AGENT_CLASS_MAP = {
             "ProsumerAgent": ProsumerAgent,
@@ -160,7 +183,6 @@ class DoubleAuctionEnv(Env):
             )
 
         # --- Define Action Space (Per Agent) ---
-        # Action: Array of [Price, Quantity] for the next 24 hours
         MAX_PRICE = 10.0
         MAX_QTY = 50.0
 
@@ -174,32 +196,35 @@ class DoubleAuctionEnv(Env):
             dtype=np.float32,
         )
 
-        # --- Define Observation Space (Per Agent) ---
-        # Obs: [ND_i] + [Market_Stats (4)] + [Price_Forecast (23)]
-
-        # This section is crazy and idk what it does
+        # --- MODIFIED: Define Observation Space as a Dictionary ---
         MAX_DEMAND_ABS = max(max(c.schedule) for c in self.agents)
         MAX_CAPACITY = max(c["generation_capacity"] for c in agent_configs)
         MAX_NET_DEMAND = MAX_DEMAND_ABS
         MIN_NET_DEMAND = -MAX_CAPACITY
         MAX_SUM_QTY = self.n_agents * MAX_QTY
 
-        # Features: ND_i, P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1
-        low_obs_base = [MIN_NET_DEMAND, 0.0, 0.0, 0.0, 0.0]
-        high_obs_base = [MAX_NET_DEMAND, MAX_PRICE, MAX_QTY, MAX_SUM_QTY, MAX_SUM_QTY]
-
-        # Add forecast prices to observation space
-        low_obs_forecast = [0.0] * (self.FORECAST_HORIZON - 1)
-        high_obs_forecast = [MAX_PRICE] * (self.FORECAST_HORIZON - 1)
-
-        low_obs = low_obs_base + low_obs_forecast
-        high_obs = high_obs_base + high_obs_forecast
-
-        self.observation_space = Box(
-            low=np.array(low_obs, dtype=np.float32),
-            high=np.array(high_obs, dtype=np.float32),
-            shape=(len(low_obs),),
-            dtype=np.float32,
+        self.observation_space = Dict(
+            {
+                # Agent State: [Net Demand, Last Cleared Qty]
+                "agent_state": Box(low=0.0, high=MAX_QTY, shape=(1,), dtype=np.float32),
+                # Market Stats: [P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1]
+                "market_stats": Box(
+                    low=np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                    high=np.array(
+                        [MAX_PRICE, MAX_SUM_QTY, MAX_SUM_QTY, MAX_SUM_QTY],
+                        dtype=np.float32,
+                    ),
+                    shape=(4,),
+                    dtype=np.float32,
+                ),
+                # Price Forecast for next 23 hours
+                "price_forecast": Box(
+                    low=0.0,
+                    high=MAX_PRICE,
+                    shape=(self.FORECAST_HORIZON - 1,),
+                    dtype=np.float32,
+                ),
+            }
         )
 
         # History logging
@@ -214,80 +239,86 @@ class DoubleAuctionEnv(Env):
         """
         Simulates market clearing for future timesteps (t+1 to t+23) based on
         submitted actions to generate a price forecast.
-
-        NOTE: This forecast uses the agents' *current* net_demand to interpret
-        their future bids/offers. It does not simulate changes in their demand.
         """
-        # if self.current_timestep == 0:
-        #     return 5 * np.ones(FORECAST_HORIZON, dtype=np.float32)
-
         forecasted_prices = []
-        for h in range(1, self.FORECAST_HORIZON):  # Iterate from hour t+1 to t+23
+        for h in range(1, self.FORECAST_HORIZON):
             future_bids, future_offers = [], []
             for agent in self.agents:
                 agent_id = agent.agent_id
                 if agent_id in actions:
-                    # Get the planned action for future hour 'h'
                     price, quantity = actions[agent_id][0][h]
                     if quantity == 0:
-                        price, quality = actions[agent_id][1][h]
-                        future_offers.extend([(agent_id, price, quality)])
+                        price, quantity = actions[agent_id][1][h]
+                        if quantity > 0:
+                            future_offers.append((agent_id, price, quantity))
                     else:
-                        future_bids.extend([(agent_id, price, quantity)])
+                        future_bids.append((agent_id, price, quantity))
 
             bids_arr = (
-                np.array(future_bids, dtype=float) if future_bids else np.array([])
+                np.array(future_bids, dtype=float) if future_bids else np.empty((0, 3))
             )
             offers_arr = (
-                np.array(future_offers, dtype=float) if future_offers else np.array([])
+                np.array(future_offers, dtype=float)
+                if future_offers
+                else np.empty((0, 3))
             )
 
-            price, _,_ = self.market_agent.clear_market(bids_arr, offers_arr)
+            price, _, _ = self.market_agent.clear_market(bids_arr, offers_arr)
             forecasted_prices.append(price)
 
         return forecasted_prices
 
-    def _get_obs(self, price_forecast: list[float]) -> dict[int, np.ndarray]:
-        """Compiles observations for each agent, including the price forecast."""
-        market_stats = [
-            self.last_clearing_price,
-            self.last_clearing_quantity,
-            self.last_total_bids_qty,
-            self.last_total_offers_qty,
-        ]
+    def _get_obs(self, price_forecast: list[float]) -> dict[int, dict[str, np.ndarray]]:
+        """Compiles dictionary observations for each agent."""
+        market_stats_arr = np.array(
+            [
+                self.last_clearing_price,
+                self.last_clearing_quantity,
+                self.last_total_bids_qty,
+                self.last_total_offers_qty,
+            ],
+            dtype=np.float32,
+        )
 
-        observations: dict[int, np.ndarray] = {}
+        price_forecast_arr = np.array(price_forecast, dtype=np.float32)
+
+        observations: dict[int, dict[str, np.ndarray]] = {}
         for agent in self.agents:
-            obs_i = agent.net_demand + market_stats + price_forecast
-            observations[agent.agent_id] = np.array(obs_i, dtype=np.float32)
+            agent_id = agent.agent_id
+            agent_state_arr = np.array(
+                [self.last_cleared_quantities[agent_id]],
+                dtype=np.float32,
+            )
+
+            observations[agent_id] = {
+                "agent_state": agent_state_arr,
+                "market_stats": market_stats_arr,
+                "price_forecast": price_forecast_arr,
+            }
 
         return observations
 
-    def _calculate_rewards(self, clearing_price: float,cleared_participants:list[tuple[int,float]]) -> dict[int, float]:
+    def _calculate_rewards(
+        self, clearing_price: float, cleared_participants: list[tuple[int, float]]
+    ) -> dict[int, float]:
         """Calculates the reward (profit) for all agents for the current timestep."""
-        def find_index(lst, value):
-            try:
-                return lst.index(value)
-            except ValueError:
-                return None
-        rewards: dict[int, float] = {}
-        cleared_agent_ids= [x[0] for x in cleared_participants]
+        rewards: dict[int, float] = {agent_id: 0.0 for agent_id in self.agent_ids}
+
+        # Create a lookup dictionary for cleared quantities
+        cleared_map = dict(cleared_participants)
+
         for agent in self.agents:
-            rewards[agent.agent_id] = 0
-            # NOTE: Not efficient, but I'm lazy and who cares about blazingly fast performance in python
-            # if agent.agent_id in cleared_agent_ids:
-            #     rewards[agent.agent_id]=agent.calculate_profit(clearing_price,)
-            idx = find_index(cleared_agent_ids,agent.agent_id)
-            if idx:
-                rewards[agent.agent_id]=agent.calculate_profit(clearing_price, cleared_participants[idx][1])
-        # for agent in cleared_participants:
-        #     rewards[agent[0]]=agent.calculate_profit(clearing_price)
+            agent_id = agent.agent_id
+            if agent_id in cleared_map:
+                cleared_qty = cleared_map[agent_id]
+                rewards[agent_id] = agent.calculate_profit(clearing_price, cleared_qty)
+
         return rewards
 
     @override
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[dict[int, np.ndarray], dict[str, Any]]:
+    ) -> tuple[dict[int, dict[str, np.ndarray]], dict[str, Any]]:
         """Resets the environment."""
         super().reset(seed=seed)
         self.current_timestep = 0
@@ -295,6 +326,9 @@ class DoubleAuctionEnv(Env):
         self.last_clearing_quantity = 0.0
         self.last_total_bids_qty = 0.0
         self.last_total_offers_qty = 0.0
+        # --- NEW: Reset cleared >quantities ---
+        self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
+
         (
             self.clearing_prices,
             self.clearing_quantities,
@@ -307,7 +341,6 @@ class DoubleAuctionEnv(Env):
             agent.calculate_net_demand()
             agent.profit = 0.0
 
-        # Initial forecast is zero
         initial_forecast = [5.0] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
@@ -316,7 +349,7 @@ class DoubleAuctionEnv(Env):
     def step(
         self, actions: dict[int, np.ndarray]
     ) -> tuple[
-        dict[int, np.ndarray],
+        dict[int, dict[str, np.ndarray]],
         dict[int, float],
         dict[int, bool],
         dict[int, bool],
@@ -338,48 +371,50 @@ class DoubleAuctionEnv(Env):
             if agent_id in actions:
                 # Use only the action for the current hour (index 0)
                 price, quantity = actions[agent_id][0][0]
+                # If bid quantity is 0, check the offers  
                 if quantity == 0:
                     price, quantity = actions[agent_id][1][0]
-                    all_offers.extend([(agent_id, price, quantity)])
+                    if quantity > 0:
+                        all_offers.append((agent_id, price, quantity))
                 else:
-                    all_bids.extend([(agent_id, price, quantity)])
+                    all_bids.append((agent_id, price, quantity))
 
         total_bids_qty = sum(b[2] for b in all_bids)
         total_offers_qty = sum(o[2] for o in all_offers)
 
-        # Market Clearing for the CURRENT HOUR
-        bids_array = np.array(all_bids, dtype=float) if all_bids else np.array([])
-        offers_array = np.array(all_offers, dtype=float) if all_offers else np.array([])
+        bids_array = np.array(all_bids, dtype=float) if all_bids else np.empty((0, 3))
+        offers_array = (
+            np.array(all_offers, dtype=float) if all_offers else np.empty((0, 3))
+        )
         self.market_orders_history.append((bids_array.copy(), offers_array.copy()))
 
-        clearing_price, clearing_quantity,cleared_participants = self.market_agent.clear_market(
-            bids_array, offers_array
+        clearing_price, clearing_quantity, cleared_participants = (
+            self.market_agent.clear_market(bids_array, offers_array)
         )
 
-        # Calculate Rewards based on CURRENT HOUR's outcome
-        reward = self._calculate_rewards(clearing_price,cleared_participants)
+        reward = self._calculate_rewards(clearing_price, cleared_participants)
 
-        # Generate Price Forecast for the NEXT 23 HOURS
         price_forecast = self._forecast_prices(actions)
 
-        # Update State for the next observation
+        # --- Update last cleared quantities for the next observation ---
+        self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
+        for agent_id, qty in cleared_participants:
+            self.last_cleared_quantities[agent_id] = qty
+
         self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
         self.last_total_bids_qty = total_bids_qty
         self.last_total_offers_qty = total_offers_qty
 
-        # Update agents' internal states for the next real timestep
         for agent in self.agents:
             agent.calculate_net_demand()
 
-        # Check Termination and Get Next Observation
         is_truncated = self.current_timestep >= self.max_timesteps
         terminated = {i: False for i in self.agent_ids}
         truncated = {i: is_truncated for i in self.agent_ids}
 
         observation = self._get_obs(price_forecast)
 
-        # Log history
         self.clearing_prices.append(clearing_price)
         self.clearing_quantities.append(clearing_quantity)
         self.profit_history.append(np.array(list(reward.values())))
@@ -408,12 +443,12 @@ class DoubleAuctionEnv(Env):
         """Returns a color based on the agent's class name."""
         agent_class_name = type(self.agents[agent_id]).__name__
         if agent_class_name == "AggressiveSellerAgent":
-            return "r"  # Red
+            return "r"
         elif agent_class_name == "AggressiveBuyerAgent":
-            return "m"  # Magenta
+            return "m"
         elif agent_class_name == "ProsumerAgent":
-            return "b"  # Blue
-        return "k"  # Black for unknown
+            return "b"
+        return "k"
 
     def get_class_label(self, agent_id: int) -> str:
         """Returns the agent's class name for legend purposes."""
@@ -422,9 +457,7 @@ class DoubleAuctionEnv(Env):
     def plot_results(self):
         """
         Generates and displays graphs of the simulation results from history.
-        All plots created here will be displayed simultaneously.
         """
-
         timesteps = range(1, self.current_timestep + 1)
 
         # Plot 1: Market Clearing Price and Quantity Over Time
@@ -449,22 +482,18 @@ class DoubleAuctionEnv(Env):
         # Plot 2: Cumulative Profit/Loss per Agent
         plt.figure(figsize=(10, 6))
         profit_matrix = np.array(self.profit_history)
-
-        # Keep track of which class/color combos have been plotted for the legend
         plotted_classes = set()
 
         for i in range(self.n_agents):
             cumulative_profit = np.cumsum(profit_matrix[:, i])
-
             agent_class_name = self.get_class_label(i)
             color = self.get_agent_color(i)
 
-            # Use label only if the class hasn't been plotted yet to avoid cluttering the legend
             if agent_class_name not in plotted_classes:
                 label = f"{agent_class_name} (Agent {i})"
                 plotted_classes.add(agent_class_name)
             else:
-                label = f"Agent {i}"  # Just show agent ID if class is redundant
+                label = f"Agent {i}"
 
             plt.plot(
                 timesteps,
@@ -482,32 +511,24 @@ class DoubleAuctionEnv(Env):
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
-
         plt.show()
 
     def plot_bid_ask_curves(self, num_plots=10):
         """
         Generates bid-ask curves for the last N timesteps, splitting the total
-        into multiple figures, with up to 10 plots per figure, for better readability.
-        The individual steps are consistently colored (Blue=Demand, Red=Supply).
-        All figures are displayed simultaneously at the end.
+        into multiple figures for better readability.
         """
-
         if len(self.market_orders_history) < 1:
             print("Not enough market history to plot bid-ask curves.")
             return
 
-        # Select the last N timesteps
         start_index = max(0, len(self.market_orders_history) - num_plots)
         plot_data = []
 
         for t in range(start_index, len(self.market_orders_history)):
-            # data['bids/offers'] is now List[Tuple[agent_id, price, quantity]]
             bids_list, offers_list = self.market_orders_history[t]
-
             clearing_price = self.clearing_prices[t]
             clearing_quantity = self.clearing_quantities[t]
-
             plot_data.append(
                 {
                     "t": t + 1,
@@ -522,123 +543,78 @@ class DoubleAuctionEnv(Env):
         if TOTAL_PLOTS == 0:
             return
 
-        # Configuration for multi-figure plotting: 10 plots per figure (2 rows x 5 columns)
         PLOTS_PER_FIGURE = 10
         N_COLS = 5
         N_ROWS = math.ceil(PLOTS_PER_FIGURE / N_COLS)
-
-        # Define standard colors for curves
-        BID_COLOR = "b"  # Blue for Demand (Bids)
-        OFFER_COLOR = "r"  # Red for Supply (Offers)
-
-        # Iterate over plot_data in chunks
+        BID_COLOR, OFFER_COLOR = "b", "r"
         num_figures = math.ceil(TOTAL_PLOTS / PLOTS_PER_FIGURE)
 
         for fig_index in range(num_figures):
             chunk_start = fig_index * PLOTS_PER_FIGURE
             chunk_end = min((fig_index + 1) * PLOTS_PER_FIGURE, TOTAL_PLOTS)
             current_chunk = plot_data[chunk_start:chunk_end]
-
-            # Determine grid size for the current figure
             num_in_chunk = len(current_chunk)
-            # Use 1 row if 5 or fewer plots, otherwise use N_ROWS (2)
             actual_rows = 1 if num_in_chunk <= N_COLS else N_ROWS
-
             fig, axes = plt.subplots(
                 actual_rows,
                 N_COLS,
-                figsize=(15, 3 * actual_rows + 1),  # Adjusted size for better fit
+                figsize=(15, 3 * actual_rows + 1),
                 constrained_layout=True,
             )
-
-            # Flatten the axes array for easier indexing, ensuring it's always iterable
             axes = np.array(axes).flatten()
 
             for i, data in enumerate(current_chunk):
                 ax = axes[i]
-
-                # --- Demand Curve (Bids) ---
                 if len(data["bids"]) > 0:
-                    bids_all = np.array(data["bids"], dtype=float)
-                    bids_sorted = bids_all[bids_all[:, 1].argsort()[::-1]]
-                    bid_prices = bids_sorted[:, 1]
-                    bid_quantities = bids_sorted[:, 2]
-
-                    # Plotting the segmented steps
+                    bids_sorted = data["bids"][data["bids"][:, 1].argsort()[::-1]]
                     current_qty = 0.0
-                    for j in range(len(bid_prices)):
-                        price = bid_prices[j]
-                        qty = bid_quantities[j]
+                    for j in range(len(bids_sorted)):
+                        price, qty = bids_sorted[j, 1], bids_sorted[j, 2]
                         next_qty = current_qty + qty
-
-                        # 1. Horizontal segment (Demand, Blue)
                         ax.plot(
                             [current_qty, next_qty],
                             [price, price],
                             color=BID_COLOR,
-                            linewidth=2.0,
-                            linestyle="-",
-                            zorder=2,
+                            lw=2.0,
                         )
-
-                        # 2. Vertical jump (generic gray)
-                        if j < len(bid_prices) - 1:
-                            next_price = bid_prices[j + 1]
+                        if j < len(bids_sorted) - 1:
+                            next_price = bids_sorted[j + 1, 1]
                             ax.plot(
                                 [next_qty, next_qty],
                                 [price, next_price],
                                 color="gray",
-                                linewidth=0.8,
-                                linestyle="--",
-                                zorder=1,
+                                lw=0.8,
+                                ls="--",
                             )
-
                         current_qty = next_qty
 
-                # --- Supply Curve (Offers) ---
                 if len(data["offers"]) > 0:
-                    offers_all = np.array(data["offers"], dtype=float)
-                    offers_sorted = offers_all[offers_all[:, 1].argsort()]
-                    offer_prices = offers_sorted[:, 1]
-                    offer_quantities = offers_sorted[:, 2]
-
-                    # Plotting the segmented steps
+                    offers_sorted = data["offers"][data["offers"][:, 1].argsort()]
                     current_qty = 0.0
-                    for j in range(len(offer_prices)):
-                        price = offer_prices[j]
-                        qty = offer_quantities[j]
+                    for j in range(len(offers_sorted)):
+                        price, qty = offers_sorted[j, 1], offers_sorted[j, 2]
                         next_qty = current_qty + qty
-
-                        # 1. Horizontal segment (Supply, Red)
                         ax.plot(
                             [current_qty, next_qty],
                             [price, price],
                             color=OFFER_COLOR,
-                            linewidth=2.0,
-                            linestyle="-",
-                            zorder=2,
+                            lw=2.0,
                         )
-
-                        # 2. Vertical jump (generic gray)
-                        if j < len(offer_prices) - 1:
-                            next_price = offer_prices[j + 1]
+                        if j < len(offers_sorted) - 1:
+                            next_price = offers_sorted[j + 1, 1]
                             ax.plot(
                                 [next_qty, next_qty],
                                 [price, next_price],
                                 color="gray",
-                                linewidth=0.8,
-                                linestyle="--",
-                                zorder=1,
+                                lw=0.8,
+                                ls="--",
                             )
-
                         current_qty = next_qty
 
-                # --- Intersection Point (Clearing Price/Quantity) ---
                 if data["price"] > 0 or data["quantity"] > 0:
                     ax.plot(
                         data["quantity"], data["price"], "go", markersize=6, zorder=5
                     )
-                    # Dotted lines to axes
                     ax.axhline(
                         data["price"],
                         color="gray",
@@ -654,87 +630,45 @@ class DoubleAuctionEnv(Env):
                         zorder=0,
                     )
 
-                # --- Legend Generation (using proxy artists for curve colors) ---
-                proxy_handles = []
-
-                # Add proxy for Demand Curve (Blue)
-                proxy_handles.append(
-                    plt.Line2D(
-                        [0],
-                        [0],
-                        color=BID_COLOR,
-                        linewidth=3,
-                        linestyle="-",
-                        label="Demand Curve",
-                    )
-                )
-
-                # Add proxy for Supply Curve (Red)
-                proxy_handles.append(
-                    plt.Line2D(
-                        [0],
-                        [0],
-                        color=OFFER_COLOR,
-                        linewidth=3,
-                        linestyle="-",
-                        label="Supply Curve",
-                    )
-                )
-
-                # Add proxy for Market Clearing Point (Green)
-                proxy_handles.append(
+                proxy_handles = [
+                    plt.Line2D([0], [0], color=BID_COLOR, lw=3, label="Demand"),
+                    plt.Line2D([0], [0], color=OFFER_COLOR, lw=3, label="Supply"),
                     plt.Line2D(
                         [0],
                         [0],
                         color="g",
                         marker="o",
-                        linestyle="",
-                        markersize=6,
-                        label=f"Clearance (${data['price']:.2f})",
-                    )
-                )
-
-                ax.set_title(f"T={data['t']} | P={data['price']:.2f}", fontsize=10)
+                        ls="",
+                        ms=6,
+                        label=f"Clear (${data['price']:.2f})",
+                    ),
+                ]
+                ax.set_title(f"T={data['t']}", fontsize=10)
                 ax.set_xlabel("Quantity (MWh)", fontsize=8)
                 ax.set_ylabel("Price ($)", fontsize=8)
-                ax.legend(handles=proxy_handles, fontsize=7, loc="lower right")
+                ax.legend(handles=proxy_handles, fontsize=7)
                 ax.grid(True, linestyle=":", alpha=0.6)
                 ax.set_xlim(left=0)
                 ax.set_ylim(bottom=0)
 
-            # Hide unused subplots in the last figure
             for j in range(num_in_chunk, len(axes)):
                 fig.delaxes(axes[j])
+            start_t, end_t = current_chunk[0]["t"], current_chunk[-1]["t"]
+            fig.suptitle(f"Bid-Ask Curves (Timesteps {start_t}-{end_t})", fontsize=14)
 
-            start_t = current_chunk[0]["t"]
-            end_t = current_chunk[-1]["t"]
-
-            fig.suptitle(
-                f"Bid-Ask Curves and Market Clearing (Timesteps {start_t} to {end_t})",
-                fontsize=14,
-            )
-
-        # Only call show once to display all generated Bid-Ask Curve figures simultaneously
         plt.show()
 
     def plot_price_change_for_single_day(self, day: int = 0):
         """
         Plots the market clearing price for each hour of a specific simulation day.
-
-        Args:
-            day (int): The day number to plot (e.g., 0 for the first day).
         """
         plt.figure(figsize=(10, 5))
-
-        # Calculate the start and end timesteps for the requested day
-        start_index = day * 24
-        end_index = start_index + 24
+        start_index, end_index = day * 24, (day + 1) * 24
 
         if self.current_timestep < start_index:
             print(f"Simulation has not reached day {day}. No data to plot.")
             return
 
-        # Slice the price history for the specific day
         daily_prices = self.clearing_prices[start_index:end_index]
         hours = range(len(daily_prices))
 
@@ -743,12 +677,7 @@ class DoubleAuctionEnv(Env):
         plt.xlabel("Hour of Day")
         plt.ylabel("Clearing Price ($)")
         plt.grid(True, linestyle="--", alpha=0.6)
-        plt.xticks(np.arange(0, 24, 2))  # Set x-axis ticks for every 2 hours
-        plt.xlim(-0.5, 23.5)  # Set x-axis limits
+        plt.xticks(np.arange(0, 24, 2))
+        plt.xlim(-0.5, 23.5)
         plt.tight_layout()
         plt.show()
-
-
-class P2P(BaseMarket):
-    def __init__(self, market_price):
-        BaseMarket.__init__(self)

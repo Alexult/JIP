@@ -171,7 +171,7 @@ class ProsumerAgent:
         x = np.array([bids, offers], dtype=np.float32)
         return x
 
-    def devise_strategy_smarter(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
+    def devise_strategy_smarter(self, obs: dict[str, np.ndarray], action_space: Box) -> np.ndarray:
         """
         [ALTERNATIVE STRATEGY]
         Strategy: price-responsive flexible prosumer.
@@ -180,9 +180,12 @@ class ProsumerAgent:
     
         # Observation breakdown: observe forecast prices for next 24h
         # obs = [ND_i, P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1, P_f_1, ..., P_f_23]
-        last_price = obs[FORECAST_HORIZON]               # last market clearing price
-        forecast_prices = obs[FORECAST_HORIZON+4:]
-        forecast_prices = np.append(forecast_prices, obs[-1] * (1 + random.uniform(-0.1, 0.1)))
+        # last_price = obs[FORECAST_HORIZON]
+        last_price = obs["market_stats"][0]               # last market clearing price
+        # forecast_prices = obs[FORECAST_HORIZON+4:]
+        forecast_prices = obs["price_forecast"]
+        
+        forecast_prices = np.append(forecast_prices, forecast_prices[-1] * (1 + random.uniform(-0.1, 0.1)))
             # np.array(obs[FORECAST_HORIZON:]))[:FORECAST_HORIZON]  # next 24h price forecast
 
         # First shift flexible load to low-price hours
