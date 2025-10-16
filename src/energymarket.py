@@ -152,6 +152,7 @@ class DoubleAuctionEnv(Env):
                     agent_id=i,
                     load=config["load"],
                     flexible_load=config["flexible_load"],
+                    fixed_load=config["fixed_load"],
                     generation_capacity=config["generation_capacity"],
                     generation_type=config["generation_type"]
                     if "generation_type" in config

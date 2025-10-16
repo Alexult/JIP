@@ -19,18 +19,20 @@ class ProsumerAgent:
             agent_id: int,
             load: [Job],
             flexible_load: float,
+            fixed_load: float,
             generation_capacity: float,
             generation_type: str = "solar"
     ):
         self.agent_id = agent_id
         self.load = load  # energy demand must be met entirely or not. can move according to the lambda in the job
+        self.fixed_load = fixed_load
         self.flexible_load = flexible_load  # can be assigned anywhere in any amount
         self.generation_capacity = generation_capacity
         self.generation_type = generation_type
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
         self.profit = 0.0
-        self.schedule = [sum([job[0] for job in load if job[1] == t]) + flexible_load / FORECAST_HORIZON for t in
-                         range(FORECAST_HORIZON)]  # current schedule to buy energy. Change this to change behaviour
+        self.schedule = [sum([job[0] for job in load if job[1] == t]) + flexible_load / FORECAST_HORIZON + fixed_load
+                         for t in range(FORECAST_HORIZON)]  # current schedule to buy energy. Change this to change behaviour
         self.net_demand = None
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
@@ -193,6 +195,8 @@ class ProsumerAgent:
         for h in cheap_hours:
             new_schedule[h] += flex_load / len(cheap_hours)
 
+        new_schedule = new_schedule + self.fixed_load
+
         self.schedule = new_schedule.tolist()
 
         # Secondly compute net demand profile
@@ -207,21 +211,28 @@ class ProsumerAgent:
             price_noise = 1 + random.uniform(-0.05, 0.05)
 
             if nd > 0:  # needs to buy
-                price = base_price * 1.05**nd * price_noise
+                price = base_price * 1.05 * price_noise
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(nd, action_space.low[h, 1], action_space.high[h, 1])
                 bids[h] = [price, qty]
                 offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
-                price = base_price * 0.95**nd * price_noise
+                price = base_price * 0.95 * price_noise
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
                 offers[h] = [price, qty]
                 bids[h] = [0, 0]
 
-
+        self.step()
 
         return np.array([bids, offers], dtype=np.float32)
+
+
+    def step(self):
+        load = self.load
+        new_load = [(job[0], job[1] - 1, job[2]) for job in load]
+        self.load = new_load
+        self.schedule = self.schedule[1:] + [0]
 
 
 
