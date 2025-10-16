@@ -4,7 +4,7 @@ from custom_types import *
 from gymnasium import Env
 from gymnasium.spaces import Box
 from abc import ABC, abstractmethod
-from prosumers import *
+from prosumer import *
 import matplotlib.pyplot as plt
 import math
 from loguru import logger
@@ -55,7 +55,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         """
         # Check if arrays are empty
         if bids_array.size == 0 or offers_array.size == 0:
-            return 0.0, 0.0
+            return 0.0, 0.0, []
 
         if (
             bids_array.ndim != 2
@@ -83,7 +83,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         match_indices = np.where(bid_prices[:min_len] >= offer_prices[:min_len])[0]
 
         if len(match_indices) == 0:
-            return 0.0, 0.0
+            return 0.0, 0.0, []
 
         k = match_indices[-1]
         marginal_bid_price = bid_prices[k]
@@ -92,8 +92,18 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         bid_cumsum = np.cumsum(bid_quantities[: k + 1])
         offer_cumsum = np.cumsum(offer_quantities[: k + 1])
         clearing_quantity = min(bid_cumsum[-1], offer_cumsum[-1])
+        cleared_participants: list[tuple[int,float]] = []
+        tmp_qty = clearing_quantity
+        for agent in bids_sorted:
+            if agent[1] > clearing_price:
+                break
+            elif tmp_qty == 0:
+                break
+            cleared_participants.append((agent[0],min(tmp_qty,agent[2])))
+            tmp_qty = max(0,tmp_qty-agent[2])
 
-        return clearing_price, clearing_quantity
+
+        return (clearing_price, clearing_quantity, cleared_participants)
 
 
 class DoubleAuctionEnv(Env):
@@ -138,8 +148,9 @@ class DoubleAuctionEnv(Env):
             self.agents.append(
                 AgentClass(
                     agent_id=i,
+                    load=config["load"],
+                    flexible_load=config["flexible_load"],
                     fixed_load=config["fixed_load"],
-                    flexible_load_max=config["flexible_load_max"],
                     generation_capacity=config["generation_capacity"],
                     generation_type=config["generation_type"]
                     if "generation_type" in config
@@ -165,9 +176,9 @@ class DoubleAuctionEnv(Env):
 
         # --- Define Observation Space (Per Agent) ---
         # Obs: [ND_i] + [Market_Stats (4)] + [Price_Forecast (23)]
-        MAX_DEMAND_ABS = max(
-            c["fixed_load"] + c["flexible_load_max"] for c in agent_configs
-        )
+
+        # This section is crazy and idk what it does
+        MAX_DEMAND_ABS = max(max(c.schedule) for c in self.agents)
         MAX_CAPACITY = max(c["generation_capacity"] for c in agent_configs)
         MAX_NET_DEMAND = MAX_DEMAND_ABS
         MIN_NET_DEMAND = -MAX_CAPACITY
@@ -207,6 +218,9 @@ class DoubleAuctionEnv(Env):
         NOTE: This forecast uses the agents' *current* net_demand to interpret
         their future bids/offers. It does not simulate changes in their demand.
         """
+        # if self.current_timestep == 0:
+        #     return 5 * np.ones(FORECAST_HORIZON, dtype=np.float32)
+
         forecasted_prices = []
         for h in range(1, self.FORECAST_HORIZON):  # Iterate from hour t+1 to t+23
             future_bids, future_offers = [], []
@@ -214,13 +228,12 @@ class DoubleAuctionEnv(Env):
                 agent_id = agent.agent_id
                 if agent_id in actions:
                     # Get the planned action for future hour 'h'
-                    price, quantity = actions[agent_id][h]
-                    # Use the agent's CURRENT net_demand to determine if it's a bid or offer
-                    bids, offers = agent.get_market_submission(price, quantity)
-                    if bids:
-                        future_bids.extend(bids)
-                    if offers:
-                        future_offers.extend(offers)
+                    price, quantity = actions[agent_id][0][h]
+                    if quantity == 0:
+                        price, quality = actions[agent_id][1][h]
+                        future_offers.extend([(agent_id, price, quality)])
+                    else:
+                        future_bids.extend([(agent_id, price, quantity)])
 
             bids_arr = (
                 np.array(future_bids, dtype=float) if future_bids else np.array([])
@@ -229,7 +242,7 @@ class DoubleAuctionEnv(Env):
                 np.array(future_offers, dtype=float) if future_offers else np.array([])
             )
 
-            price, _ = self.market_agent.clear_market(bids_arr, offers_arr)
+            price, _,_ = self.market_agent.clear_market(bids_arr, offers_arr)
             forecasted_prices.append(price)
 
         return forecasted_prices
@@ -245,17 +258,30 @@ class DoubleAuctionEnv(Env):
 
         observations: dict[int, np.ndarray] = {}
         for agent in self.agents:
-            private_info = [agent.net_demand]
-            obs_i = private_info + market_stats + price_forecast
+            obs_i = agent.net_demand + market_stats + price_forecast
             observations[agent.agent_id] = np.array(obs_i, dtype=np.float32)
 
         return observations
 
-    def _calculate_rewards(self, clearing_price: float) -> dict[int, float]:
+    def _calculate_rewards(self, clearing_price: float,cleared_participants:list[tuple[int,float]]) -> dict[int, float]:
         """Calculates the reward (profit) for all agents for the current timestep."""
+        def find_index(lst, value):
+            try:
+                return lst.index(value)
+            except ValueError:
+                return None
         rewards: dict[int, float] = {}
+        cleared_agent_ids= [x[0] for x in cleared_participants]
         for agent in self.agents:
-            rewards[agent.agent_id] = agent.calculate_profit(clearing_price)
+            rewards[agent.agent_id] = 0
+            # NOTE: Not efficient, but I'm lazy and who cares about blazingly fast performance in python
+            # if agent.agent_id in cleared_agent_ids:
+            #     rewards[agent.agent_id]=agent.calculate_profit(clearing_price,)
+            idx = find_index(cleared_agent_ids,agent.agent_id)
+            if idx:
+                rewards[agent.agent_id]=agent.calculate_profit(clearing_price, cleared_participants[idx][1])
+        # for agent in cleared_participants:
+        #     rewards[agent[0]]=agent.calculate_profit(clearing_price)
         return rewards
 
     @override
@@ -278,11 +304,11 @@ class DoubleAuctionEnv(Env):
         ) = [], [], [], [], []
 
         for agent in self.agents:
-            agent.calculate_net_demand(self.current_timestep)
+            agent.calculate_net_demand()
             agent.profit = 0.0
 
         # Initial forecast is zero
-        initial_forecast = [0.0] * (self.FORECAST_HORIZON - 1)
+        initial_forecast = [5.0] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info
@@ -311,12 +337,12 @@ class DoubleAuctionEnv(Env):
             agent_id = agent.agent_id
             if agent_id in actions:
                 # Use only the action for the current hour (index 0)
-                price, quantity = actions[agent_id][0]
-                bids, offers = agent.get_market_submission(price, quantity)
-                if bids:
-                    all_bids.extend(bids)
-                if offers:
-                    all_offers.extend(offers)
+                price, quantity = actions[agent_id][0][0]
+                if quantity == 0:
+                    price, quantity = actions[agent_id][1][0]
+                    all_offers.extend([(agent_id, price, quantity)])
+                else:
+                    all_bids.extend([(agent_id, price, quantity)])
 
         total_bids_qty = sum(b[2] for b in all_bids)
         total_offers_qty = sum(o[2] for o in all_offers)
@@ -326,12 +352,12 @@ class DoubleAuctionEnv(Env):
         offers_array = np.array(all_offers, dtype=float) if all_offers else np.array([])
         self.market_orders_history.append((bids_array.copy(), offers_array.copy()))
 
-        clearing_price, clearing_quantity = self.market_agent.clear_market(
+        clearing_price, clearing_quantity,cleared_participants = self.market_agent.clear_market(
             bids_array, offers_array
         )
 
         # Calculate Rewards based on CURRENT HOUR's outcome
-        reward = self._calculate_rewards(clearing_price)
+        reward = self._calculate_rewards(clearing_price,cleared_participants)
 
         # Generate Price Forecast for the NEXT 23 HOURS
         price_forecast = self._forecast_prices(actions)
@@ -344,7 +370,7 @@ class DoubleAuctionEnv(Env):
 
         # Update agents' internal states for the next real timestep
         for agent in self.agents:
-            agent.calculate_net_demand(self.current_timestep)
+            agent.calculate_net_demand()
 
         # Check Termination and Get Next Observation
         is_truncated = self.current_timestep >= self.max_timesteps

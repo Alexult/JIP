@@ -2,41 +2,55 @@ from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent
 from loguru import logger
 
 if __name__ == "__main__":
+
+    fixed = lambda job, t: 1 if job[1] == t else 0
+
+    c = 0.4
+    linear = lambda job, t: max(1 - abs(job[1] - t) * c, 0)
+
+    free = lambda job, t: 1
+
     AGENT_CONFIGS = [
         {
             "class": "AggressiveSellerAgent",
-            "fixed_load": 10,
-            "flexible_load_max": 8,
+            "load": [(10, 2, free)],
+            "flexible_load": 1,
+            "fixed_load": 2,
             "generation_capacity": 40,
+            "generation_type": "solar",
         },
         {
             "class": "AggressiveBuyerAgent",
-            "fixed_load": 18,
-            "flexible_load_max": 7,
+            "load": [(40, 1, linear), (30, 8, fixed)],
+            "flexible_load": 50,
+            "fixed_load": 10,
             "generation_capacity": 5,
         },
         {
             "class": "ProsumerAgent",
-            "fixed_load": 12,
-            "flexible_load_max": 6,
-            "generation_capacity": 30,
+            "load": [(40, 17, free), (67, 8, fixed)],
+            "flexible_load": 6,
+            "fixed_load": 5,
+            "generation_capacity": 50,
             "generation_type": "wind",
         },
         {
             "class": "ProsumerAgent",
-            "fixed_load": 34,
-            "flexible_load_max": 9,
-            "generation_capacity": 18,
+            "load": [(20, 12, linear), (30, 14, fixed)],
+            "flexible_load": 5,
+            "fixed_load": 25,
+            "generation_capacity": 60,
             "generation_type": "wind",
         },
         {
             "class": "ProsumerAgent",
-            "fixed_load": 19,
-            "flexible_load_max": 5,
+            "load": [(34, 4, linear), (24, 16, fixed)],
+            "flexible_load": 5,
+            "fixed_load": 29,
             "generation_capacity": 11,
         },
     ]
-    MAX_STEPS = 24 * 10
+    MAX_STEPS = 23
 
     env = DoubleAuctionEnv(
         agent_configs=AGENT_CONFIGS,
@@ -45,6 +59,7 @@ if __name__ == "__main__":
     )
 
     logger.info(f"Starting MARL Episode Demo ({MAX_STEPS} steps)")
+
 
     # Initial observation received upon reset
     observations, info = env.reset()
@@ -60,7 +75,7 @@ if __name__ == "__main__":
             obs_i = observations[agent_id]
 
             # --- CALL AGENT'S DEVISE_STRATEGY METHOD (Uses ProsumerAgent or subclass method) ---
-            actions[agent_id] = env.agents[agent_id].devise_strategy(
+            actions[agent_id] = env.agents[agent_id].devise_strategy_smarter(
                 obs_i, env.action_space
             )
 
