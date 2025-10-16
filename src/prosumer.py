@@ -179,7 +179,9 @@ class ProsumerAgent:
         # Observation breakdown: observe forecast prices for next 24h
         # obs = [ND_i, P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1, P_f_1, ..., P_f_23]
         last_price = obs[FORECAST_HORIZON]               # last market clearing price
-        forecast_prices = np.array(obs[FORECAST_HORIZON:])[:FORECAST_HORIZON]  # next 24h price forecast
+        forecast_prices = obs[FORECAST_HORIZON+4:]
+        forecast_prices = np.append(forecast_prices, obs[-1] * (1 + random.uniform(-0.1, 0.1)))
+            # np.array(obs[FORECAST_HORIZON:]))[:FORECAST_HORIZON]  # next 24h price forecast
 
         # First shift flexible load to low-price hours
         sorted_hours = np.argsort(forecast_prices)  # cheapest -> most expensive
@@ -197,25 +199,29 @@ class ProsumerAgent:
         self.calculate_net_demand()
 
         # Then generate bids/offers
-        bids_offers = []
+        bids = np.zeros((FORECAST_HORIZON, 2))
+        offers = np.zeros((FORECAST_HORIZON, 2))
         for h in range(FORECAST_HORIZON):
             nd = self.net_demand[h]
             base_price = forecast_prices[h]
             price_noise = 1 + random.uniform(-0.05, 0.05)
 
             if nd > 0:  # needs to buy
-                price = base_price * (1.05 + 0.1 * (nd / max(1, self.flexible_load))) * price_noise
+                price = base_price * 1.05**nd * price_noise
+                price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(nd, action_space.low[h, 1], action_space.high[h, 1])
+                bids[h] = [price, qty]
+                offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
-                price = base_price * (0.95 - 0.1 * (nd / min(-1, -self.flexible_load))) * price_noise
+                price = base_price * 0.95**nd * price_noise
+                price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
-            else:
-                price, qty = 0.0, 0.0
+                offers[h] = [price, qty]
+                bids[h] = [0, 0]
 
-            price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
-            bids_offers.append([price, qty])
 
-        return np.array(bids_offers, dtype=np.float32)
+
+        return np.array([bids, offers], dtype=np.float32)
 
 
 
