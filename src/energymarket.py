@@ -330,10 +330,27 @@ class DoubleAuctionEnv(Env):
 
         return observations
 
-    def _calculate_rewards(
-        self, clearing_price: float, cleared_participants: list[tuple[int, float]]
+    # def _calculate_rewards(
+    #     self, clearing_price: float, cleared_participants: list[tuple[int, float]]
+    # ) -> dict[int, float]:
+    #     """Calculates the reward (profit) for all agents for the current timestep."""
+    #     rewards: dict[int, float] = {agent_id: 0.0 for agent_id in self.agent_ids}
+
+    #     # Create a lookup dictionary for cleared quantities
+    #     cleared_map = dict(cleared_participants)
+
+    #     for agent in self.agents:
+    #         agent_id = agent.agent_id
+    #         if agent_id in cleared_map:
+    #             cleared_qty = cleared_map[agent_id]
+    #             rewards[agent_id] = agent.calculate_profit(clearing_price, cleared_qty)
+
+    #     return rewards
+    
+    def _calculate_rewards( 
+            self, clearing_price: float, cleared_participants: list[tuple[int, float]]
     ) -> dict[int, float]:
-        """Calculates the reward (profit) for all agents for the current timestep."""
+        """Calculates rewards (profit) and tracks energy bought/sold per agent."""
         rewards: dict[int, float] = {agent_id: 0.0 for agent_id in self.agent_ids}
 
         # Create a lookup dictionary for cleared quantities
@@ -341,11 +358,35 @@ class DoubleAuctionEnv(Env):
 
         for agent in self.agents:
             agent_id = agent.agent_id
-            if agent_id in cleared_map:
-                cleared_qty = cleared_map[agent_id]
-                rewards[agent_id] = agent.calculate_profit(clearing_price, cleared_qty)
+            qty_cleared = cleared_map.get(agent_id, 0.0)
+
+            if not hasattr(agent, "energy_bought_total"):
+                agent.energy_bought_total = 0.0
+            if not hasattr(agent, "energy_sold_total"):
+                agent.energy_sold_total = 0.0
+            if not hasattr(agent, "energy_history"):
+                agent.energy_history = []
+
+            if hasattr(agent, "net_demand"):
+                nd = agent.net_demand[0] if isinstance(agent.net_demand, (list, np.ndarray)) else agent.net_demand
+            else:
+                nd = 0.0
+
+            # buyers have +net_demand → they buy energy
+            if nd > 0 and qty_cleared > 0:
+                agent.energy_bought_total += qty_cleared
+                agent.energy_history.append(("buy", qty_cleared, clearing_price))
+            elif nd < 0 and qty_cleared > 0:
+                agent.energy_sold_total += qty_cleared
+                agent.energy_history.append(("sell", qty_cleared, clearing_price))
+            else:
+                agent.energy_history.append(("none", 0.0, clearing_price))
+
+            # profit/reward tracking
+            rewards[agent_id] = agent.calculate_profit(clearing_price, qty_cleared)
 
         return rewards
+
 
     @override
     def reset(
