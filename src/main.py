@@ -1,7 +1,11 @@
-from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent
+from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent, WholesaleMarketEnv
 from loguru import logger
 
 if __name__ == "__main__":
+    # --- ENVIRONMENT SELECTION ---
+    # Set to True for WholesaleMarketEnv, False for DoubleAuctionEnv
+    USE_WHOLESALE_MARKET = True  
+
     fixed = lambda job, t: 1 if job[1] == t else 0
 
     c = 0.4
@@ -51,11 +55,21 @@ if __name__ == "__main__":
     ]
     MAX_STEPS = 23
 
-    env = DoubleAuctionEnv(
-        agent_configs=AGENT_CONFIGS,
-        max_timesteps=MAX_STEPS,
-        market_clearing_agent=DoubleAuctionClearingAgent(),
-    )
+    # --- CREATE ENVIRONMENT BASED ON SELECTION ---
+    if USE_WHOLESALE_MARKET:
+        env = WholesaleMarketEnv(
+            agent_configs=AGENT_CONFIGS,
+            wholesale_csv_path="../data/representative_wholesale_price_2025.csv",
+            max_timesteps=MAX_STEPS,
+        )
+        env_name = "Wholesale Market"
+    else:
+        env = DoubleAuctionEnv(
+            agent_configs=AGENT_CONFIGS,
+            max_timesteps=MAX_STEPS,
+            market_clearing_agent=DoubleAuctionClearingAgent(),
+        )
+        env_name = "Double Auction"
 
     logger.info(f"Starting MARL Episode Demo ({MAX_STEPS} steps)")
 
@@ -83,9 +97,15 @@ if __name__ == "__main__":
         current_step_reward = sum(rewards.values())
         total_reward += current_step_reward
         env.render()
-    print(f"\n--- Episode Finished ---")
+    print(f"\n--- Simulation Finished ---")
     print(f"Total Cumulative Profit (All Agents): {total_reward:.2f}")
 
     env.plot_results()
-    env.plot_bid_ask_curves(num_plots=5)
+
+    # Environment-specific additional plots
+    if USE_WHOLESALE_MARKET:
+        env.plot_trading_pattern()
+    else:
+        env.plot_bid_ask_curves(num_plots=5)    
+
     env.plot_price_change_for_single_day(day=0)
