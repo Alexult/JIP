@@ -1,3 +1,5 @@
+import random
+import json
 from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent
 from loguru import logger
 
@@ -17,8 +19,6 @@ if __name__ == "__main__":
             "fixed_load": 2,
             "generation_capacity": 40,
             "generation_type": "solar",
-            "cost_per_unit": 0.35,
-            "margin": 0.05,
         },
         {
             "class": "AggressiveBuyerAgent",
@@ -26,8 +26,6 @@ if __name__ == "__main__":
             "flexible_load": 50,
             "fixed_load": 10,
             "generation_capacity": 5,
-            "cost_per_unit": 0.15,
-            "margin": 0.03,
         },
         {
             "class": "ProsumerAgent",
@@ -36,8 +34,6 @@ if __name__ == "__main__":
             "fixed_load": 5,
             "generation_capacity": 50,
             "generation_type": "wind",
-            "cost_per_unit": 0.15,
-            "margin": 0.10,
         },
         {
             "class": "ProsumerAgent",
@@ -46,8 +42,6 @@ if __name__ == "__main__":
             "fixed_load": 25,
             "generation_capacity": 60,
             "generation_type": "wind",
-            "cost_per_unit": 0.12,
-            "margin": 0.05,
         },
         {
             "class": "ProsumerAgent",
@@ -55,11 +49,85 @@ if __name__ == "__main__":
             "flexible_load": 5,
             "fixed_load": 29,
             "generation_capacity": 11,
-            "cost_per_unit": 0.12,
-            "margin": 0.05,
         },
     ]
     MAX_STEPS = 23
+    AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
+    GENERATION_TYPES = ["solar", "wind", "none"]
+
+    # Function to generate 100 agents
+    def generate_agents(n = 100, seed = 42):
+        random.seed(seed)
+        agents = []
+        for i in range(n):
+            agent_class = random.choice(AGENT_CLASSES)
+
+            # Generate load patterns
+            loads = []
+            for _ in range(random.randint(1,3)):
+                qty = random.randint(5,100)
+                t = random.randint(0,MAX_STEPS)
+                shape = random.choice(SHAPE_NAMES)
+                loads.append({"qty": qty, "time": t, "shape": shape})
+
+            flexible_load = random.randint(5,80)
+            fixed_load = random.randint(1,30)
+            generation_capacity = random.randint(0,100)
+            generation_type = random.choice(GENERATION_TYPES)
+
+            agents.append({
+                "id": i,
+                "agent_class": agent_class,
+                "loads": loads,
+                "flexible_load": flexible_load,
+                "fixed_load": fixed_load,
+                "generation_capacity": generation_capacity,
+                "generation_type": generation_type,
+            })
+        return agents
+
+    # Function to save agents to JSON
+    def save_agents_to_json(agents, filename="agents_100.json"):
+        with open(filename, "w") as f:
+            json.dump(agents, f, indent=2)
+        print(f"Stored {len(agents)} agents in {filename}")
+
+    # Function to load agents from JSON
+    def load_agents_from_json(filename="agents_100.json"):
+        with open(filename, "r") as f:
+            return json.load(f)
+
+    # Function to convert JSON agents -> AGENT_CONFIGS
+    def convert_json_agents_configs(json_agents):
+        configs = []
+        for j in json_agents:
+            loads = []
+            for load in j["loads"]:
+                # Convert shape to callable
+                shape_func = SHAPE_MAP[load["shape"]]
+                loads.append((int(load["qty"]), int(load["time"]), shape_func))
+
+            config = {
+                "class": j["agent_class"],
+                "load": loads,
+                "flexible_load": int(j["flexible_load"]),
+                "fixed_load": int(j["fixed_load"]),
+                "generation_capacity": int(j["generation_capacity"]),
+            }
+            # Check if the generation type is "none"
+            gt = j.get("generation_type",None) # pulls value from JSON agent j under "generation_type"
+                                                 # and if it doesn't exist it uses the value "none"
+            if gt:
+                config["generation_type"] = gt
+
+            configs.append(config)
+        return configs
+
+    agents_JSON = generate_agents(n = 100, seed = 42)
+    save_agents_to_json(agents_JSON, "agents_100.json")
+
+    AGENT_CONFIGS = convert_json_agents_configs(agents_JSON)
+
 
     env = DoubleAuctionEnv(
         agent_configs=AGENT_CONFIGS,
