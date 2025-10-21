@@ -59,7 +59,7 @@ if __name__ == "__main__":
     if USE_WHOLESALE_MARKET:
         env = WholesaleMarketEnv(
             agent_configs=AGENT_CONFIGS,
-            wholesale_csv_path="../data/representative_wholesale_price_2025.csv",
+            wholesale_csv_path="./data/representative_wholesale_price_2025.csv",
             max_timesteps=MAX_STEPS,
         )
         env_name = "Wholesale Market"
@@ -104,7 +104,8 @@ if __name__ == "__main__":
 
     # Environment-specific additional plots
     if USE_WHOLESALE_MARKET:
-        env.plot_trading_pattern()
+        # env.plot_trading_pattern()
+        pass
     else:
         env.plot_bid_ask_curves(num_plots=5)    
 
