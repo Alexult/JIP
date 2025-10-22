@@ -12,6 +12,8 @@ class ProsumerAgent:
     """
     Represents a prosumer (producer + consumer) agent.
     Manages state, profit calculation, and defines a default strategy for a 24-hour horizon.
+    cost_per_unit: the cost per unit of producing their solar/wind energy
+    margin: how much profit margin the producer needs to make minimum [0,1] corrosponds to 0%-100%
     """
 
     def __init__(
@@ -21,6 +23,8 @@ class ProsumerAgent:
         flexible_load: float,
         fixed_load: float,
         generation_capacity: float,
+        cost_per_unit: float,
+        margin: float,
         generation_type: str = "solar",
     ):
         self.agent_id = agent_id
@@ -31,6 +35,9 @@ class ProsumerAgent:
         self.generation_type = generation_type
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
         self.profit = 0.0
+        self.profit_margin = margin
+        self.cost_per_unit = cost_per_unit
+        self.price_per_unit = (1 + self.profit_margin) * self.cost_per_unit
         self.schedule = [
             sum([job[0] for job in load if job[1] == t])
             + flexible_load / FORECAST_HORIZON

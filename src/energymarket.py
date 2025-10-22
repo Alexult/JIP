@@ -207,6 +207,8 @@ class DoubleAuctionEnv(Env):
                     flexible_load=config["flexible_load"],
                     fixed_load=config["fixed_load"],
                     generation_capacity=config["generation_capacity"],
+                    cost_per_unit=config["cost_per_unit"],
+                    margin=config["margin"],
                     generation_type=config["generation_type"]
                     if "generation_type" in config
                     and config["generation_type"] is not None
@@ -370,10 +372,10 @@ class DoubleAuctionEnv(Env):
             self.action_history,
         ) = [], [], [], [], []
 
-         # NEW histories for consumption & costs #######################
+        # NEW histories for consumption & costs #######################
         self.preferred_consumption_history = []  # total requested bids qty each timestep (MWh)
-        self.actual_consumption_history = []     # total cleared buyer qty each timestep (MWh)
-        self.total_price_paid_history = []       # clearing_price * actual_consumption (monetary units)
+        self.actual_consumption_history = []  # total cleared buyer qty each timestep (MWh)
+        self.total_price_paid_history = []  # clearing_price * actual_consumption (monetary units)
         self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
 
         for agent in self.agents:
@@ -455,9 +457,10 @@ class DoubleAuctionEnv(Env):
         self.actual_consumption_history.append(actual_consumption)
         self.total_price_paid_history.append(total_price_paid)
         cumulative = (
-            (self.cumulative_price_paid_history[-1] if self.cumulative_price_paid_history else 0.0)
-            + total_price_paid
-        )
+            self.cumulative_price_paid_history[-1]
+            if self.cumulative_price_paid_history
+            else 0.0
+        ) + total_price_paid
         self.cumulative_price_paid_history.append(cumulative)
         ############
 
@@ -751,59 +754,69 @@ class DoubleAuctionEnv(Env):
         plt.tight_layout()
         plt.show()
 
-
-
     def plot_consumption_and_costs(self):
-            """
-            Plots:
-            1) total preferred consumption vs total actual consumption over time
-            2) total price paid per timestep
-            3) cumulative total price paid over time
-            """
-            import matplotlib.pyplot as plt
-            import numpy as np
+        """
+        Plots:
+        1) total preferred consumption vs total actual consumption over time
+        2) total price paid per timestep
+        3) cumulative total price paid over time
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
 
-            T = len(self.preferred_consumption_history)
-            if T == 0:
-                print("No history to plot (run an episode first).")
-                return
+        T = len(self.preferred_consumption_history)
+        if T == 0:
+            print("No history to plot (run an episode first).")
+            return
 
-            timesteps = list(range(1, T + 1))
+        timesteps = list(range(1, T + 1))
 
-            # Convert to numpy arrays for convenience
-            preferred = np.array(self.preferred_consumption_history, dtype=float)
-            actual = np.array(self.actual_consumption_history, dtype=float)
-            price_paid = np.array(self.total_price_paid_history, dtype=float)
-            cumulative_paid = np.array(self.cumulative_price_paid_history, dtype=float)
+        # Convert to numpy arrays for convenience
+        preferred = np.array(self.preferred_consumption_history, dtype=float)
+        actual = np.array(self.actual_consumption_history, dtype=float)
+        price_paid = np.array(self.total_price_paid_history, dtype=float)
+        cumulative_paid = np.array(self.cumulative_price_paid_history, dtype=float)
 
-            # Plot 1: preferred vs actual consumption
-            plt.figure(figsize=(10, 5))
-            plt.plot(timesteps, preferred, marker="o", linestyle="-", label="Preferred (requested) consumption")
-            plt.plot(timesteps, actual, marker="o", linestyle="-", label="Actual (cleared) consumption")
-            plt.title("Total Preferred vs Actual Consumption Over Time")
-            plt.xlabel("Timestep")
-            plt.ylabel("Energy (MWh)")
-            plt.grid(True, linestyle="--", alpha=0.6)
-            plt.legend()
-            plt.tight_layout()
-            plt.show()
+        # Plot 1: preferred vs actual consumption
+        plt.figure(figsize=(10, 5))
+        plt.plot(
+            timesteps,
+            preferred,
+            marker="o",
+            linestyle="-",
+            label="Preferred (requested) consumption",
+        )
+        plt.plot(
+            timesteps,
+            actual,
+            marker="o",
+            linestyle="-",
+            label="Actual (cleared) consumption",
+        )
+        plt.title("Total Preferred vs Actual Consumption Over Time")
+        plt.xlabel("Timestep")
+        plt.ylabel("Energy (MWh)")
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
 
-            # Plot 2: total price paid per timestep
-            plt.figure(figsize=(10, 4))
-            plt.bar(timesteps, price_paid)
-            plt.title("Total Price Paid by Buyers per Timestep")
-            plt.xlabel("Timestep")
-            plt.ylabel("Price Paid (monetary units)")
-            plt.grid(axis="y", linestyle=":", alpha=0.6)
-            plt.tight_layout()
-            plt.show()
+        # Plot 2: total price paid per timestep
+        plt.figure(figsize=(10, 4))
+        plt.bar(timesteps, price_paid)
+        plt.title("Total Price Paid by Buyers per Timestep")
+        plt.xlabel("Timestep")
+        plt.ylabel("Price Paid (monetary units)")
+        plt.grid(axis="y", linestyle=":", alpha=0.6)
+        plt.tight_layout()
+        plt.show()
 
-            # Plot 3: cumulative price paid over time
-            plt.figure(figsize=(10, 4))
-            plt.plot(timesteps, cumulative_paid, marker="o", linestyle="-")
-            plt.title("Cumulative Total Price Paid Over Time")
-            plt.xlabel("Timestep")
-            plt.ylabel("Cumulative Price Paid (monetary units)")
-            plt.grid(True, linestyle="--", alpha=0.6)
-            plt.tight_layout()
-            plt.show()
+        # Plot 3: cumulative price paid over time
+        plt.figure(figsize=(10, 4))
+        plt.plot(timesteps, cumulative_paid, marker="o", linestyle="-")
+        plt.title("Cumulative Total Price Paid Over Time")
+        plt.xlabel("Timestep")
+        plt.ylabel("Cumulative Price Paid (monetary units)")
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.tight_layout()
+        plt.show()

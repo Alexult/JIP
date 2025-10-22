@@ -17,6 +17,8 @@ if __name__ == "__main__":
             "fixed_load": 2,
             "generation_capacity": 40,
             "generation_type": "solar",
+            "cost_per_unit": 0.35,
+            "margin": 0.05,
         },
         {
             "class": "AggressiveBuyerAgent",
@@ -24,6 +26,8 @@ if __name__ == "__main__":
             "flexible_load": 50,
             "fixed_load": 10,
             "generation_capacity": 5,
+            "cost_per_unit": 0.15,
+            "margin": 0.03,
         },
         {
             "class": "ProsumerAgent",
@@ -32,6 +36,8 @@ if __name__ == "__main__":
             "fixed_load": 5,
             "generation_capacity": 50,
             "generation_type": "wind",
+            "cost_per_unit": 0.15,
+            "margin": 0.10,
         },
         {
             "class": "ProsumerAgent",
@@ -40,6 +46,8 @@ if __name__ == "__main__":
             "fixed_load": 25,
             "generation_capacity": 60,
             "generation_type": "wind",
+            "cost_per_unit": 0.12,
+            "margin": 0.05,
         },
         {
             "class": "ProsumerAgent",
@@ -47,6 +55,8 @@ if __name__ == "__main__":
             "flexible_load": 5,
             "fixed_load": 29,
             "generation_capacity": 11,
+            "cost_per_unit": 0.12,
+            "margin": 0.05,
         },
     ]
     MAX_STEPS = 23
@@ -90,4 +100,3 @@ if __name__ == "__main__":
     env.plot_consumption_and_costs()
     env.plot_bid_ask_curves(num_plots=5)
     env.plot_price_change_for_single_day(day=0)
-    
