@@ -215,3 +215,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 .direnv/
+/agents_100.json
+/data/

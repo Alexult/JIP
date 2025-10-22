@@ -2,16 +2,14 @@ import argparse
 import random
 import json
 import os
+import perlin_noise
+import numpy as np
+import matplotlib.pyplot as plt
+
 from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent
 from loguru import logger
 
-def fixed(job, t): return 1 if job[1] == t else 0
-def linear(job, t, c=0.4): return max(1 - abs(job[1] - t) * c, 0)
-def free(job, t): return 1
-
-SHAPE_MAP = {'fixed': fixed, 'linear': lambda job, t: linear(job, t, 0.4), 'free': free}
-SHAPE_NAMES = list(SHAPE_MAP.keys())
-MAX_STEPS = 23
+MAX_STEPS = 48
 AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
 GENERATION_TYPES = ["solar", "wind", "none"]
 
@@ -20,29 +18,27 @@ def generate_agents(n=100, seed=42):
     random.seed(seed)
     agents = []
     for i in range(n):
+
         agent_class = random.choice(AGENT_CLASSES)
-
-    SHAPE_MAP = {'fixed': fixed, 'linear': linear, 'free': free}
-    SHAPE_NAMES = list(SHAPE_MAP.keys())
-    MAX_STEPS = 23
-    AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
-    GENERATION_TYPES = ["solar", "wind", "none"]
-
-        flexible_load = random.randint(5, 80)
-        fixed_load = random.randint(1, 30)
+        load = generate_load(MAX_STEPS)
         generation_capacity = random.randint(0, 100)
         generation_type = random.choice(GENERATION_TYPES)
-
         agents.append({
             "id": i,
             "agent_class": agent_class,
-            "loads": loads,
-            "flexible_load": flexible_load,
-            "fixed_load": fixed_load,
+            "loads": load,
+            "flexibility": random.uniform(1, 2),
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
         })
     return agents
+
+
+def generate_load(length:int):
+    noise = perlin_noise.PerlinNoise(octaves=1)
+    scale = random.randrange(10, 100)
+    y = [scale * (noise(i * 0.1) + 1) for i in range(MAX_STEPS)]
+    return y
 
 # Save agents to JSON
 def save_agents_to_json(agents, filename="agents_100.json"):
@@ -60,16 +56,11 @@ def load_agents_from_json(filename="agents_100.json"):
 def convert_json_agents_configs(json_agents):
     configs = []
     for j in json_agents:
-        loads = []
-        for load in j["loads"]:
-            shape_func = SHAPE_MAP[load["shape"]]
-            loads.append((int(load["qty"]), int(load["time"]), shape_func))
 
         config = {
             "class": j["agent_class"],
-            "load": loads,
-            "flexible_load": int(j["flexible_load"]),
-            "fixed_load": int(j["fixed_load"]),
+            "load": j["loads"],
+            "flexibility": j["flexibility"],
             "generation_capacity": int(j["generation_capacity"]),
         }
         gt = j.get("generation_type", None)

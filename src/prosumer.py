@@ -19,9 +19,8 @@ class ProsumerAgent:
     def __init__(
         self,
         agent_id: int,
-        load: [Job],
-        flexible_load: float,
-        fixed_load: float,
+        load: list[float],
+        flexibility: float,
         generation_capacity: float,
         cost_per_unit: float,
         margin: float,
@@ -29,22 +28,17 @@ class ProsumerAgent:
     ):
         self.agent_id = agent_id
         self.load = load  # energy demand must be met entirely or not. can move according to the lambda in the job
-        self.fixed_load = fixed_load
-        self.flexible_load = flexible_load  # can be assigned anywhere in any amount
         self.generation_capacity = generation_capacity
         self.generation_type = generation_type
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
         self.profit = 0.0
+        self.flexibility = flexibility
+        self.schedule = [l for l in load] # current schedule to buy energy. Change this to change behaviour
         self.profit_margin = margin
         self.cost_per_unit = cost_per_unit
         self.price_per_unit = (1 + self.profit_margin) * self.cost_per_unit
-        self.schedule = [
-            sum([job[0] for job in load if job[1] == t])
-            + flexible_load / FORECAST_HORIZON
-            + fixed_load
-            for t in range(FORECAST_HORIZON)
-        ]  # current schedule to buy energy. Change this to change behaviour
         self.net_demand = None
+        self.imbalance = 0
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
         df = pd.read_csv(generation_data_file)
@@ -211,25 +205,21 @@ class ProsumerAgent:
         )
         # np.array(obs[FORECAST_HORIZON:]))[:FORECAST_HORIZON]  # next 24h price forecast
 
-        # First shift flexible load to low-price hours
         sorted_hours = np.argsort(forecast_prices)  # cheapest -> most expensive
-        flex_load = self.flexible_load
-        new_schedule = np.array(
-            [
-                sum([job[0] for job in self.load if job[1] == t])
-                for t in range(FORECAST_HORIZON)
-            ],
-            dtype=float,
-        )
+        new_schedule = self.schedule
 
         # Allocate flexible load to cheapest 25% of hours
         cheap_hours = sorted_hours[: FORECAST_HORIZON // 4]
         for h in cheap_hours:
-            new_schedule[h] += flex_load / len(cheap_hours)
+            new_schedule[h] += 1
+        for h in sorted_hours[-FORECAST_HORIZON // 4:]:
+            new_schedule[h] -= 1
 
-        new_schedule = new_schedule + self.fixed_load
+        cost = 0
+        for i, val in enumerate(self.load):
+            cost += (val - new_schedule[i]) ** 2 * self.flexibility * val
 
-        self.schedule = new_schedule.tolist()
+        self.schedule = new_schedule
 
         # Secondly compute net demand profile
         self.calculate_net_demand()
@@ -249,7 +239,7 @@ class ProsumerAgent:
                 bids[h] = [price, qty]
                 offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
-                price = base_price * price_noise * (1 - 0.1 * (0.99) ** nd)
+                price = base_price * price_noise * (1 - 0.1 * (0.91) ** nd)
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
                 price = max(price, self.price_per_unit*qty)
@@ -261,10 +251,8 @@ class ProsumerAgent:
         return np.array([bids, offers], dtype=np.float32)
 
     def step(self):
-        load = self.load
-        new_load = [(job[0], job[1] - 1, job[2]) for job in load]
-        self.load = new_load
-        self.schedule = self.schedule[1:] + [0]
+        self.schedule = self.schedule
+        # self.schedule[1:] + [0])
 
     def optimize_schedule(self, obs: np.ndarray) -> None:
         self.schedule = []

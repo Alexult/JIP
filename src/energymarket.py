@@ -208,12 +208,11 @@ class DoubleAuctionEnv(Env):
                 AgentClass(
                     agent_id=i,
                     load=config["load"],
-                    flexible_load=config["flexible_load"],
-                    fixed_load=config["fixed_load"],
                     generation_capacity=config["generation_capacity"],
                     cost_per_unit=config["cost_per_unit"],
                     margin=config["margin"],
-                    generation_type=config["generation_type"]
+                    generation_type=config["generation_type"],
+                    flexibility=config["flexibility"]
                     if "generation_type" in config
                     and config["generation_type"] is not None
                     else "solar",
