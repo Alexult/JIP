@@ -6,10 +6,14 @@ import perlin_noise
 import numpy as np
 import matplotlib.pyplot as plt
 
-from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent
+from energymarket import (
+    DoubleAuctionEnv,
+    DoubleAuctionClearingAgent,
+    FlexibilityMarketEnv,
+)
 from loguru import logger
 
-MAX_STEPS = 48
+MAX_STEPS = 24
 AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
 GENERATION_TYPES = ["solar", "wind", "none"]
 
@@ -70,8 +74,10 @@ def convert_json_agents_configs(json_agents):
     return configs
 
 def run_episode(agent_configs, max_steps=MAX_STEPS):
-    env = DoubleAuctionEnv(
+    env = FlexibilityMarketEnv(
         agent_configs=agent_configs,
+        market_clearing_agent=DoubleAuctionClearingAgent(),
+        discount=(0.9, 1000),
         max_timesteps=max_steps,
         market_clearing_agent=DoubleAuctionClearingAgent(),
         buy_tariff=0.23,

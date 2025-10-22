@@ -199,20 +199,23 @@ class ProsumerAgent:
         last_price = obs["market_stats"][0]  # last market clearing price
         # forecast_prices = obs[FORECAST_HORIZON+4:]
         forecast_prices = obs["price_forecast"]
-
-        forecast_prices = np.append(
+        discount_prices = obs["discount_price_forecast"]
+        buy_prices = np.append(
             forecast_prices, forecast_prices[-1] * (1 + random.uniform(-0.1, 0.1))
         )
-        # np.array(obs[FORECAST_HORIZON:]))[:FORECAST_HORIZON]  # next 24h price forecast
+        sell_prices = np.append(
+            discount_prices, discount_prices[-1] * (1 + random.uniform(-0.1, 0.1))
+        )
 
-        sorted_hours = np.argsort(forecast_prices)  # cheapest -> most expensive
+        sorted_buy_hours = np.argsort(buy_prices)
+        sorted_sell_hours = np.argsort(sell_prices)
         new_schedule = self.schedule
 
         # Allocate flexible load to cheapest 25% of hours
-        cheap_hours = sorted_hours[: FORECAST_HORIZON // 4]
+        cheap_hours = sorted_buy_hours[: FORECAST_HORIZON // 4]
         for h in cheap_hours:
             new_schedule[h] += 1
-        for h in sorted_hours[-FORECAST_HORIZON // 4:]:
+        for h in sorted_buy_hours[-FORECAST_HORIZON // 4:]:
             new_schedule[h] -= 1
 
         cost = 0
@@ -229,16 +232,18 @@ class ProsumerAgent:
         offers = np.zeros((FORECAST_HORIZON, 2))
         for h in range(FORECAST_HORIZON):
             nd = self.net_demand[h]
-            base_price = forecast_prices[h]
+
             price_noise = 1 + random.uniform(-0.05, 0.05)
 
             if nd > 0:  # needs to buy
+                base_price = buy_prices[h]
                 price = base_price * price_noise * (1 + 0.1 * (1.01) ** (-nd))
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(nd, action_space.low[h, 1], action_space.high[h, 1])
                 bids[h] = [price, qty]
                 offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
+                base_price = sell_prices[h]
                 price = base_price * price_noise * (1 - 0.1 * (0.91) ** nd)
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
