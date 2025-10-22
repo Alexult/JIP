@@ -358,7 +358,8 @@ class DoubleAuctionEnv(Env):
         self.last_clearing_quantity = 0.0
         self.last_total_bids_qty = 0.0
         self.last_total_offers_qty = 0.0
-        # --- NEW: Reset cleared >quantities ---
+
+        # --- NEW: Reset cleared quantities ---
         self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
 
         (
@@ -430,7 +431,7 @@ class DoubleAuctionEnv(Env):
             self.market_agent.clear_market(bids_array, offers_array, debug=True)
         )
 
-                # ---------- NEW: compute preferred and actual consumption and cost ----------
+        ########## preferred and actual consumption and cost
         # preferred consumption = sum of all bid quantities submitted for this current hour
         preferred_consumption = float(total_bids_qty)  # already computed above
 
@@ -449,7 +450,7 @@ class DoubleAuctionEnv(Env):
         # total price paid by buyers this timestep
         total_price_paid = float(clearing_price) * actual_consumption
 
-        # append into history arrays (cumulative will be computed and stored)
+        # append into history arrays (cumulative computed and stored)
         self.preferred_consumption_history.append(preferred_consumption)
         self.actual_consumption_history.append(actual_consumption)
         self.total_price_paid_history.append(total_price_paid)
@@ -458,7 +459,7 @@ class DoubleAuctionEnv(Env):
             + total_price_paid
         )
         self.cumulative_price_paid_history.append(cumulative)
-        # ---------------------------------------------------------------------------
+        ############
 
         reward = self._calculate_rewards(clearing_price, cleared_participants)
 
