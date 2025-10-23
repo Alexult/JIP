@@ -4,8 +4,42 @@ from custom_types import *
 import random
 import pandas as pd
 from loguru import logger
+import os
 
 FORECAST_HORIZON = 24
+
+
+PRICE_CSV_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "data",
+    "representative_days_wholesale_price_2025.csv",
+)
+
+
+def load_data(csv_path: str):
+    """Return dict {day_str: DataFrame(hour, price)} for each calendar day in file."""
+    df = pd.read_csv(csv_path)
+    ts_col = "Datetime (Local)"
+    p_col = "Price (EUR/MWhe)"
+
+    # Parse timestamps and split into days
+    df[ts_col] = pd.to_datetime(df[ts_col])
+    df["day"] = df[ts_col].dt.date
+    df["hour"] = df[ts_col].dt.hour
+
+    days = {}
+    for d, sub in df.groupby("day"):
+        sub = sub.sort_values("hour")[["hour", p_col]].reset_index(drop=True)
+        if len(sub) != 24:
+            print(
+                f"Warning: day {d} has {len(sub)} rows (expected 24). Using what's available."
+            )
+        days[str(d)] = sub
+    return days
+
+
+NATIONAL_MARKET_DATA = load_data(PRICE_CSV_PATH)
 
 
 class ProsumerAgent:
@@ -33,11 +67,13 @@ class ProsumerAgent:
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
         self.profit = 0.0
         self.flexibility = flexibility
-        self.schedule = [l for l in load] # current schedule to buy energy. Change this to change behaviour
+        self.schedule = [
+            l for l in load
+        ]  # current schedule to buy energy. Change this to change behaviour
         self.profit_margin = margin
         self.cost_per_unit = cost_per_unit
         self.price_per_unit = (1 + self.profit_margin) * self.cost_per_unit
-        self.net_demand = None
+        self.net_demand = []
         self.imbalance = 0
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
@@ -64,11 +100,16 @@ class ProsumerAgent:
         )
         return effective_generation
 
-    def calculate_net_demand(self):
+    def calculate_net_demand(self, current_timestep):
         """
         Calculates and updates the net_demand at the timestep
         """
-        self.net_demand = [self._calculate_demand(t) for t in range(FORECAST_HORIZON)]
+        assert current_timestep >= 1
+
+        self.net_demand = [
+            self._calculate_demand(t + current_timestep - 1)
+            for t in range(FORECAST_HORIZON)
+        ]
 
     def _calculate_demand(self, timestep: int) -> float:
         """
@@ -76,6 +117,7 @@ class ProsumerAgent:
         """
         # Determine the hour of the day (0-23) from the simulation timestep
         hour_of_day = timestep % 24
+        logger.debug(f"timestep:{timestep}, self.schedule:{len(self.schedule)}")
         effective_generation = (
             self._calc_solar_generation(hour_of_day)
             if self.generation_type == "solar"
@@ -124,6 +166,16 @@ class ProsumerAgent:
         # i.e your submitted bid is lower than clearing price or
         # your ask was more than clearing price.
         return profit
+
+    def handle_after_auction(self, qty_got: float, timestep) -> float:
+        assert timestep >= 1
+        # NOTE: THE DATAFRAME HAS ONLY data for 24 hours, get more data
+        t = (timestep - 1) % 24
+        day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
+        price = day.iloc[t, 1]
+        logger.debug(f"timestep:{timestep}, net_demand: {len(self.net_demand)}")
+        qty_remaining = self.net_demand[0] - qty_got
+        return price * qty_remaining
 
     def devise_strategy(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
         """
@@ -186,17 +238,19 @@ class ProsumerAgent:
         return x
 
     def devise_strategy_smarter(
-        self, obs: dict[str, np.ndarray], action_space: Box
+        self, timestep: int, obs: dict[str, np.ndarray], action_space: Box
     ) -> np.ndarray:
         """
         [ALTERNATIVE STRATEGY]
         Strategy: price-responsive flexible prosumer.
         Shifts flexible load to cheaper forecast hours and sets bid/offer prices relative to last known clearing price.
         """
+        assert timestep >= 1
 
         # Observation breakdown: observe forecast prices for next 24h
         # last_price = obs[FORECAST_HORIZON]
         last_price = obs["market_stats"][0]  # last market clearing price
+        last_qty = obs["agent_state"][0]
         # forecast_prices = obs[FORECAST_HORIZON+4:]
         forecast_prices = obs["price_forecast"]
         discount_prices = obs["discount_price_forecast"]
@@ -207,12 +261,13 @@ class ProsumerAgent:
             discount_prices, discount_prices[-1] * (1 + random.uniform(-0.1, 0.1))
         )
 
-        buy_prices = [buy_prices[h] if buy_prices[h] > 0 else buy_prices[h-1] for h in range(FORECAST_HORIZON)]
+        buy_prices = [
+            buy_prices[h] if buy_prices[h] > 0 else buy_prices[h - 1]
+            for h in range(FORECAST_HORIZON)
+        ]
 
         sorted_buy_hours = np.argsort(buy_prices)
         sorted_sell_hours = np.argsort(sell_prices)
-
-
 
         new_schedule = self.schedule
 
@@ -220,7 +275,7 @@ class ProsumerAgent:
         cheap_hours = sorted_buy_hours[: FORECAST_HORIZON // 4]
         for h in cheap_hours:
             new_schedule[h] += 2
-        for h in sorted_buy_hours[-FORECAST_HORIZON // 4:]:
+        for h in sorted_buy_hours[-FORECAST_HORIZON // 4 :]:
             new_schedule[h] -= 2
 
         cost = 0
@@ -230,7 +285,7 @@ class ProsumerAgent:
         self.schedule = new_schedule
 
         # Secondly compute net demand profile
-        self.calculate_net_demand()
+        self.calculate_net_demand(current_timestep=timestep)
 
         # Then generate bids/offers
         bids = np.zeros((FORECAST_HORIZON, 2))
@@ -270,8 +325,10 @@ class ProsumerAgent:
 class AggressiveSellerAgent(ProsumerAgent):
     """Aggressive seller: sells entire surplus at minimum price for all 24 hours."""
 
-    def devise_strategy_smarter(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
-        return super().devise_strategy_smarter(obs, action_space)
+    def devise_strategy_smarter(
+        self, timestep: int, obs, action_space: Box
+    ) -> np.ndarray:
+        return super().devise_strategy_smarter(timestep, obs, action_space)
         # net_demand = obs[0]
         # last_price = obs[1]
         #
@@ -301,8 +358,10 @@ class AggressiveSellerAgent(ProsumerAgent):
 class AggressiveBuyerAgent(ProsumerAgent):
     """Aggressive buyer: buys to cover deficit at maximum price for all 24 hours."""
 
-    def devise_strategy_smarter(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
-        return super().devise_strategy_smarter(obs, action_space)
+    def devise_strategy_smarter(
+        self, timestep: int, obs, action_space: Box
+    ) -> np.ndarray:
+        return super().devise_strategy_smarter(timestep, obs, action_space)
         # net_demand = obs[0]
         # last_price = obs[1]
         # MAX_PRICE = action_space.high[0, 0]

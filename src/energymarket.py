@@ -481,14 +481,15 @@ class DoubleAuctionEnv(Env):
         self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
         for agent_id, qty in cleared_participants:
             self.last_cleared_quantities[agent_id] = qty
+            self.agents[agent_id].handle_after_auction(qty, self.current_timestep)
 
         self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
         self.last_total_bids_qty = total_bids_qty
         self.last_total_offers_qty = total_offers_qty
 
-        for agent in self.agents:
-            agent.calculate_net_demand()
+        # for agent in self.agents:
+        #     agent.calculate_net_demand(self.current_timestep)
 
         is_truncated = self.current_timestep >= self.max_timesteps
         terminated = {i: False for i in self.agent_ids}
@@ -857,7 +858,9 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
         sell_tariff: float,
         max_timesteps: int = 100,
     ):
-        super().__init__(agent_configs, market_clearing_agent, buy_tariff, sell_tariff, max_timesteps)
+        super().__init__(
+            agent_configs, market_clearing_agent, buy_tariff, sell_tariff, max_timesteps
+        )
         self.costs = 0
         self.min = 1000
         self.discount = discount
@@ -883,9 +886,7 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
                         future_bids.append((agent_id, price, quantity))
 
             bids_arr = (
-                np.array(future_bids, dtype=float)
-                if future_bids
-                else np.empty((0, 3))
+                np.array(future_bids, dtype=float) if future_bids else np.empty((0, 3))
             )
             offers_arr = (
                 np.array(future_offers, dtype=float)
@@ -893,9 +894,7 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
                 else np.empty((0, 3))
             )
 
-            price, quantity, _ = self.market_agent.clear_market(
-                bids_arr, offers_arr
-            )
+            price, quantity, _ = self.market_agent.clear_market(bids_arr, offers_arr)
             if quantity < self.discount[1]:
                 discount_price = price * self.discount[0]
                 forecasted_prices.append((price, discount_price))
@@ -964,13 +963,10 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
         self.total_price_paid_history = []  # clearing_price * actual_consumption (monetary units)
         self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
 
-
         for agent in self.agents:
-            agent.calculate_net_demand()
             agent.profit = 0.0
 
         initial_forecast = [(0.62, 0.62)] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info
-
