@@ -170,6 +170,8 @@ class DoubleAuctionEnv(Env):
         self,
         agent_configs: list[dict[str, Any]],
         market_clearing_agent: MarketClearingAgent,
+        buy_tariff: float,
+        sell_tariff: float,
         max_timesteps: int = 100,
     ):
         super().__init__()
@@ -181,6 +183,8 @@ class DoubleAuctionEnv(Env):
         self.max_timesteps = max_timesteps
         self.current_timestep = 0
         self.FORECAST_HORIZON = 24
+        self.buy_tariff = buy_tariff
+        self.sell_tariff = sell_tariff
 
         # Public Market Stats
         self.last_clearing_price = 5.0
@@ -239,8 +243,8 @@ class DoubleAuctionEnv(Env):
 
         self.observation_space = Dict(
             {
-                # Agent State: [Net Demand, Last Cleared Qty]
-                "agent_state": Box(low=0.0, high=MAX_QTY, shape=(1,), dtype=np.float32),
+                # Agent State: [Last Cleared Qty,Current buy tariff, Current sell tariff]
+                "agent_state": Box(low=0.0, high=MAX_QTY, shape=(3,), dtype=np.float32),
                 # Market Stats: [P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1]
                 "market_stats": Box(
                     low=np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),
@@ -320,7 +324,11 @@ class DoubleAuctionEnv(Env):
         for agent in self.agents:
             agent_id = agent.agent_id
             agent_state_arr = np.array(
-                [self.last_cleared_quantities[agent_id]],
+                [
+                    self.last_cleared_quantities[agent_id],
+                    self.buy_tariff,
+                    self.sell_tariff,
+                ],
                 dtype=np.float32,
             )
 
@@ -345,7 +353,9 @@ class DoubleAuctionEnv(Env):
             agent_id = agent.agent_id
             if agent_id in cleared_map:
                 cleared_qty = cleared_map[agent_id]
-                rewards[agent_id] = agent.calculate_profit(clearing_price, cleared_qty)
+                rewards[agent_id] = agent.calculate_profit(
+                    clearing_price, cleared_qty, self.buy_tariff, self.sell_tariff
+                )
 
         return rewards
 
