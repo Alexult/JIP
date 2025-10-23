@@ -853,9 +853,11 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
         agent_configs: list[dict[str, Any]],
         market_clearing_agent: MarketClearingAgent,
         discount: tuple[float, float],
+        buy_tariff: float,
+        sell_tariff: float,
         max_timesteps: int = 100,
     ):
-        super().__init__(agent_configs, market_clearing_agent, max_timesteps)
+        super().__init__(agent_configs, market_clearing_agent, buy_tariff, sell_tariff, max_timesteps)
         self.costs = 0
         self.min = 1000
         self.discount = discount
@@ -958,6 +960,12 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
             self.net_demand_history,
             self.action_history,
         ) = [], [], [], [], []
+
+        self.preferred_consumption_history = []  # total requested bids qty each timestep (MWh)
+        self.actual_consumption_history = []  # total cleared buyer qty each timestep (MWh)
+        self.total_price_paid_history = []  # clearing_price * actual_consumption (monetary units)
+        self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
+
 
         for agent in self.agents:
             agent.calculate_net_demand()

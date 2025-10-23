@@ -34,6 +34,8 @@ def generate_agents(n=100, seed=42):
             "flexibility": random.uniform(1, 2),
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
+            "cost_per_unit": random.random() + 0.001,
+            "margin": random.random() + 0.001,
         })
     return agents
 
@@ -66,6 +68,8 @@ def convert_json_agents_configs(json_agents):
             "load": j["loads"],
             "flexibility": j["flexibility"],
             "generation_capacity": int(j["generation_capacity"]),
+            "cost_per_unit": float(j["cost_per_unit"]),
+            "margin": float(j["margin"]),
         }
         gt = j.get("generation_type", None)
         if gt:
@@ -79,7 +83,6 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
         market_clearing_agent=DoubleAuctionClearingAgent(),
         discount=(0.9, 1000),
         max_timesteps=max_steps,
-        market_clearing_agent=DoubleAuctionClearingAgent(),
         buy_tariff=0.23,
         sell_tariff=0.10,
     )
