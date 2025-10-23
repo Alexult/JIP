@@ -55,6 +55,8 @@ if __name__ == "__main__":
         agent_configs=AGENT_CONFIGS,
         max_timesteps=MAX_STEPS,
         market_clearing_agent=DoubleAuctionClearingAgent(),
+        buy_tariff=0.23,
+        sell_tariff=0.10,
     )
 
     logger.info(f"Starting MARL Episode Demo ({MAX_STEPS} steps)")

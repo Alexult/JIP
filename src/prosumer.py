@@ -103,15 +103,21 @@ class ProsumerAgent:
 
         return bids, offers
 
-    def calculate_profit(self, clearing_price: float, qty_got: float) -> float:
+    def calculate_profit(
+        self,
+        clearing_price: float,
+        qty_got: float,
+        buy_tariff: float,
+        sell_tariff: float,
+    ) -> float:
         """Calculates profit based on the last action submitted for the cleared hour."""
         profit = 0.0
         if self.last_bid_offer:
             price_submitted, qty_submitted = self.last_bid_offer
             if self.net_demand > 0 and price_submitted >= clearing_price:
-                profit = (price_submitted - clearing_price) * qty_got
+                profit = (price_submitted - clearing_price - buy_tariff) * qty_got
             elif self.net_demand < 0 and price_submitted <= clearing_price:
-                profit = (clearing_price - price_submitted) * qty_got
+                profit = (clearing_price - price_submitted - sell_tariff) * qty_got
         self.profit = profit
         # TODO: handle case where you were not cleared in the auction,
         # i.e your submitted bid is lower than clearing price or
