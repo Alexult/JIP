@@ -786,7 +786,7 @@ class DoubleAuctionEnv(Env):
             plt.grid(True, linestyle="--", alpha=0.6)
             plt.legend()
             plt.tight_layout()
-            plt.show()
+            #plt.show()
 
             # Plot 2: total price paid per timestep
             plt.figure(figsize=(10, 4))
@@ -796,7 +796,7 @@ class DoubleAuctionEnv(Env):
             plt.ylabel("Price Paid (monetary units)")
             plt.grid(axis="y", linestyle=":", alpha=0.6)
             plt.tight_layout()
-            plt.show()
+            #plt.show()
 
             # Plot 3: cumulative price paid over time
             plt.figure(figsize=(10, 4))
