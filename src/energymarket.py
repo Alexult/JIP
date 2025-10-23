@@ -192,6 +192,7 @@ class DoubleAuctionEnv(Env):
             i: 0.0 for i in self.agent_ids
         }
 
+
         self.AGENT_CLASS_MAP = {
             "ProsumerAgent": ProsumerAgent,
             "AggressiveSellerAgent": AggressiveSellerAgent,
@@ -214,6 +215,10 @@ class DoubleAuctionEnv(Env):
                     else "solar",
                 )
             )
+
+        loads = [agents.load for agents in self.agents]
+        loads = list(map(list, zip(*loads)))
+        self.total_demand = [sum(loads[i]) for i in range(max_timesteps)]
 
         # --- Define Action Space (Per Agent) ---
         MAX_PRICE = 20.0
@@ -382,7 +387,6 @@ class DoubleAuctionEnv(Env):
         self.actual_consumption_history = []  # total cleared buyer qty each timestep (MWh)
         self.total_price_paid_history = []  # clearing_price * actual_consumption (monetary units)
         self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
-        self.
 
         for agent in self.agents:
             agent.calculate_net_demand()
@@ -591,6 +595,7 @@ class DoubleAuctionEnv(Env):
         plt.tight_layout()
         plt.show()
 
+
     def plot_bid_ask_curves(self, num_plots=10):
         """
         Generates bid-ask curves for the last N timesteps, splitting the total
@@ -776,8 +781,8 @@ class DoubleAuctionEnv(Env):
         timesteps = list(range(1, T + 1))
 
         # Convert to numpy arrays for convenience
-        preferred = np.array(self.preferred_consumption_history, dtype=float)
-        actual = np.array(self.actual_consumption_history, dtype=float)
+        preferred = np.array(self.total_demand, dtype=float)
+        actual = np.array(self.clearing_quantities, dtype=float)
         price_paid = np.array(self.total_price_paid_history, dtype=float)
         cumulative_paid = np.array(self.cumulative_price_paid_history, dtype=float)
 

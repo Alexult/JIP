@@ -17,12 +17,12 @@ MAX_STEPS = 24
 AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
 GENERATION_TYPES = ["solar", "wind", "none"]
 
+
 # Function to generate agents
 def generate_agents(n=100, seed=42):
     random.seed(seed)
     agents = []
     for i in range(n):
-
         agent_class = random.choice(AGENT_CLASSES)
         load = generate_load(MAX_STEPS)
         generation_capacity = random.randint(0, 100)
@@ -34,19 +34,20 @@ def generate_agents(n=100, seed=42):
             "flexibility": random.uniform(1, 2),
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
-            "cost_per_unit": random.randint(550, 600)/1000,
-            "margin": 1/50,
+            "cost_per_unit": random.randint(550, 600) / 1000,
+            "margin": 1 / 50,
         })
     return agents
 
 
-def generate_load(length:int):
+def generate_load(length: int):
     noise = perlin_noise.PerlinNoise(octaves=1)
     scale = random.randrange(10, 40)
     y = [scale * (noise(i * 0.1) + 1) for i in range(MAX_STEPS)]
     # plt.figure()
     # plt.bar(range(24), y)
     return y
+
 
 # Save agents to JSON
 def save_agents_to_json(agents, filename="agents_100.json"):
@@ -55,10 +56,12 @@ def save_agents_to_json(agents, filename="agents_100.json"):
     print(f"Stored {len(agents)} agents in {filename}")
     return filename
 
+
 # Load agents from JSON
 def load_agents_from_json(filename="agents_100.json"):
     with open(filename, "r") as f:
         return json.load(f)
+
 
 # Convert JSON agents -> AGENT_CONFIGS
 def convert_json_agents_configs(json_agents):
@@ -79,6 +82,7 @@ def convert_json_agents_configs(json_agents):
         configs.append(config)
     return configs
 
+
 def run_episode(agent_configs, max_steps=MAX_STEPS):
     env = FlexibilityMarketEnv(
         agent_configs=agent_configs,
@@ -98,8 +102,8 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
         for agent_id in env.agent_ids:
             obs_i = observations[agent_id]
             actions[agent_id] = env.agents[agent_id].devise_strategy(
-                obs_i, env.action_space,        buy_tariff=0.23,
-        sell_tariff=0.10,
+                obs_i, env.action_space, buy_tariff=0.23,
+                sell_tariff=0.10,
 
             )
 
@@ -115,6 +119,7 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
     env.plot_consumption_and_costs()
     env.plot_bid_ask_curves(num_plots=5)
     env.plot_price_change_for_single_day(day=0)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -152,6 +157,7 @@ def parse_args():
     )
     return parser.parse_args()
 
+
 def main():
     args = parse_args()
 
@@ -173,6 +179,7 @@ def main():
 
     agent_configs = convert_json_agents_configs(agents_JSON)
     run_episode(agent_configs, max_steps=args.steps)
+
 
 if __name__ == "__main__":
     main()
