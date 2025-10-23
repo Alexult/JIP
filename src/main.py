@@ -13,7 +13,7 @@ from energymarket import (
 )
 from loguru import logger
 
-MAX_STEPS = 200
+MAX_STEPS = 24
 AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
 GENERATION_TYPES = ["solar", "wind", "none"]
 
@@ -85,8 +85,6 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
         market_clearing_agent=DoubleAuctionClearingAgent(),
         discount=(1, 1000),
         max_timesteps=max_steps,
-        buy_tariff=0.23,
-        sell_tariff=0.10,
     )
 
     logger.info(f"Starting MARL Episode Demo ({max_steps} steps)")
@@ -99,8 +97,10 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
         actions = {}
         for agent_id in env.agent_ids:
             obs_i = observations[agent_id]
-            actions[agent_id] = env.agents[agent_id].devise_strategy_smarter(
-                obs_i, env.action_space
+            actions[agent_id] = env.agents[agent_id].devise_strategy(
+                obs_i, env.action_space,        buy_tariff=0.23,
+        sell_tariff=0.10,
+
             )
 
         observations, rewards, all_terminated, all_truncated, info = env.step(actions)
@@ -168,7 +168,7 @@ def main():
         agents_JSON = load_agents_from_json(path)
     else:
         # Default behavior: generate 100 with seed 42 (keeps old script's spirit)
-        agents_JSON = generate_agents(n=100, seed=42)
+        agents_JSON = generate_agents(n=20, seed=42)
         save_agents_to_json(agents_JSON, "agents_100.json")
 
     agent_configs = convert_json_agents_configs(agents_JSON)

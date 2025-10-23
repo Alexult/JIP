@@ -5,3 +5,4 @@ ruff==0.12.10
 gymnasium==1.2.1
 loguru==0.7.3
 perlin-noise
+scipy==1.16.2

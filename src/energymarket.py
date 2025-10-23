@@ -170,8 +170,6 @@ class DoubleAuctionEnv(Env):
         self,
         agent_configs: list[dict[str, Any]],
         market_clearing_agent: MarketClearingAgent,
-        buy_tariff: float,
-        sell_tariff: float,
         max_timesteps: int = 100,
     ):
         super().__init__()
@@ -183,8 +181,6 @@ class DoubleAuctionEnv(Env):
         self.max_timesteps = max_timesteps
         self.current_timestep = 0
         self.FORECAST_HORIZON = 24
-        self.buy_tariff = buy_tariff
-        self.sell_tariff = sell_tariff
 
         # Public Market Stats
         self.last_clearing_price = 5.0
@@ -348,13 +344,13 @@ class DoubleAuctionEnv(Env):
         # Create a lookup dictionary for cleared quantities
         cleared_map = dict(cleared_participants)
 
-        for agent in self.agents:
-            agent_id = agent.agent_id
-            if agent_id in cleared_map:
-                cleared_qty = cleared_map[agent_id]
-                rewards[agent_id] = agent.calculate_profit(
-                    clearing_price, cleared_qty, self.buy_tariff, self.sell_tariff
-                )
+        # for agent in self.agents:
+        #     agent_id = agent.agent_id
+        #     if agent_id in cleared_map:
+        #         cleared_qty = cleared_map[agent_id]
+        #         rewards[agent_id] = agent.calculate_profit(
+        #             clearing_price, cleared_qty
+        #         )
 
         return rewards
 
@@ -386,6 +382,7 @@ class DoubleAuctionEnv(Env):
         self.actual_consumption_history = []  # total cleared buyer qty each timestep (MWh)
         self.total_price_paid_history = []  # clearing_price * actual_consumption (monetary units)
         self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
+        self.
 
         for agent in self.agents:
             agent.calculate_net_demand()
@@ -770,23 +767,6 @@ class DoubleAuctionEnv(Env):
         2) total price paid per timestep
         3) cumulative total price paid over time
         """
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        T = len(self.preferred_consumption_history)
-        if T == 0:
-            print("No history to plot (run an episode first).")
-            return
-
-    def plot_consumption_and_costs(self):
-        """
-        Plots:
-        1) total preferred consumption vs total actual consumption over time
-        2) total price paid per timestep
-        3) cumulative total price paid over time
-        """
-        import matplotlib.pyplot as plt
-        import numpy as np
 
         T = len(self.preferred_consumption_history)
         if T == 0:
@@ -853,11 +833,9 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
         agent_configs: list[dict[str, Any]],
         market_clearing_agent: MarketClearingAgent,
         discount: tuple[float, float],
-        buy_tariff: float,
-        sell_tariff: float,
         max_timesteps: int = 100,
     ):
-        super().__init__(agent_configs, market_clearing_agent, buy_tariff, sell_tariff, max_timesteps)
+        super().__init__(agent_configs, market_clearing_agent, max_timesteps)
         self.costs = 0
         self.min = 1000
         self.discount = discount
