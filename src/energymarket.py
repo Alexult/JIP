@@ -902,8 +902,6 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
             else:
                 forecasted_prices.append((price, price))
 
-
-
         return forecasted_prices
 
     @override
@@ -971,7 +969,7 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
             agent.calculate_net_demand()
             agent.profit = 0.0
 
-        initial_forecast = [(0.5, 0.5)] * (self.FORECAST_HORIZON - 1)
+        initial_forecast = [(0.62, 0.62)] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info

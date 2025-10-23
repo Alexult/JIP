@@ -13,7 +13,7 @@ from energymarket import (
 )
 from loguru import logger
 
-MAX_STEPS = 24
+MAX_STEPS = 200
 AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
 GENERATION_TYPES = ["solar", "wind", "none"]
 
@@ -34,16 +34,18 @@ def generate_agents(n=100, seed=42):
             "flexibility": random.uniform(1, 2),
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
-            "cost_per_unit": random.randint(20, 80)/100,
-            "margin": random.randint(1,4)/50,
+            "cost_per_unit": random.randint(550, 600)/1000,
+            "margin": 1/50,
         })
     return agents
 
 
 def generate_load(length:int):
     noise = perlin_noise.PerlinNoise(octaves=1)
-    scale = random.randrange(50, 200)
+    scale = random.randrange(10, 40)
     y = [scale * (noise(i * 0.1) + 1) for i in range(MAX_STEPS)]
+    # plt.figure()
+    # plt.bar(range(24), y)
     return y
 
 # Save agents to JSON
@@ -81,7 +83,7 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
     env = FlexibilityMarketEnv(
         agent_configs=agent_configs,
         market_clearing_agent=DoubleAuctionClearingAgent(),
-        discount=(0.9, 1000),
+        discount=(1, 1000),
         max_timesteps=max_steps,
         buy_tariff=0.23,
         sell_tariff=0.10,
