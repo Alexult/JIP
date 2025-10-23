@@ -22,8 +22,7 @@ class ProsumerAgent:
             load: list[float],
             flexibility: float,
             generation_capacity: float,
-            cost_per_unit: float,
-            margin: float,
+            marginal_price: float,
             generation_type: str = "solar",
     ):
         self.agent_id = agent_id
@@ -34,11 +33,9 @@ class ProsumerAgent:
         self.profit = 0.0
         self.flexibility = flexibility
         self.schedule = [l for l in load]  # current schedule to buy energy. Change this to change behaviour
-        self.profit_margin = margin
-        self.cost_per_unit = cost_per_unit
-        self.price_per_unit = (1 + self.profit_margin) * self.cost_per_unit
+        self.marginal_price = marginal_price
         self.net_demand = None
-        self.total_energy = sum(self.schedule)
+        self.total_energy = sum(self.schedule[0:-1])
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
         df = pd.read_csv(generation_data_file)
@@ -50,6 +47,8 @@ class ProsumerAgent:
         ]
         del df
         del generation_data_file
+
+        self.calculate_net_demand()
 
     def _calc_solar_generation(self, hour_of_day: int):
         effective_generation = (
@@ -76,54 +75,12 @@ class ProsumerAgent:
         """
         # Determine the hour of the day (0-23) from the simulation timestep
         hour_of_day = timestep % 24
-        effective_generation = (
-            self._calc_solar_generation(hour_of_day)
-            if self.generation_type == "solar"
-            else self._calc_wind_generation(hour_of_day)
-        )
+        effective_generation = 0
+        if self.generation_type == "solar":
+            effective_generation = self._calc_solar_generation(hour_of_day)
+        elif self.generation_type == "wind":
+            effective_generation = self._calc_wind_generation(hour_of_day)
         return self.schedule[timestep] - effective_generation
-
-    def get_market_submission(
-            self, price: float, quantity: float
-    ) -> tuple[list[Bid], list[Offer]]:
-        """
-        Takes a single action (price, quantity) and translates it into a bid or offer.
-        Also stores this as the last submitted action for profit calculation.
-        """
-        bids: list[Bid] = []
-        offers: list[Offer] = []
-        quantity = max(0.0, quantity)
-
-        # Store the action for the current hour for profit calculation
-        self.last_bid_offer = (price, quantity)
-
-        if self.net_demand > 0:
-            bids.append((self.agent_id, price, quantity))
-        elif self.net_demand < 0:
-            offers.append((self.agent_id, price, quantity))
-
-        return bids, offers
-
-    # def calculate_profit(
-    #     self,
-    #     clearing_price: float,
-    #     qty_got: float,
-    #     buy_tariff: float,
-    #     sell_tariff: float,
-    # ) -> float:
-    #     """Calculates profit based on the last action submitted for the cleared hour."""
-    #     profit = 0.0
-    #     if self.last_bid_offer:
-    #         price_submitted, qty_submitted = self.last_bid_offer
-    #         if self.net_demand > 0 and price_submitted >= clearing_price:
-    #             profit = (price_submitted - clearing_price - buy_tariff) * qty_got
-    #         elif self.net_demand < 0 and price_submitted <= clearing_price:
-    #             profit = (clearing_price - price_submitted - sell_tariff) * qty_got
-    #     self.profit = profit
-    #     # TODO: handle case where you were not cleared in the auction,
-    #     # i.e your submitted bid is lower than clearing price or
-    #     # your ask was more than clearing price.
-    #     return profit
 
     def devise_strategy(self, obs: dict[str, np.ndarray], action_space: Box, buy_tariff=0.23, sell_tariff=0.10,
                         ) -> np.ndarray:
@@ -139,23 +96,20 @@ class ProsumerAgent:
 
         buy_prices = [buy_prices[h] if buy_prices[h] > 0 else buy_prices[h - 1] for h in range(FORECAST_HORIZON)]
 
+        self.total_energy -= obs["agent_state"][-1] - self.schedule[-1]
+
         new_schedule = self.schedule
 
         def objective(x: list) -> float:
             return sum(i[0] * i[1] for i in zip(x, buy_prices))
 
         x0 = new_schedule
-        row = [1] + [0] * (FORECAST_HORIZON - 1)
-        # A = [row[-i:] + row[:-i] for i in range(FORECAST_HORIZON)] + [[1] * FORECAST_HORIZON]
         bnds = [(0, action_space.high[0, 1]) for i in range(FORECAST_HORIZON)]
-        # ub = [action_space.high[0,1]] * FORECAST_HORIZON + [self.total_energy]
-        # lb = [0] * FORECAST_HORIZON + [self.total_energy]
-        # constraint = sc.LinearConstraint(A, lb, ub)
         cons = {"type": "eq", "fun": lambda x: sum(x) - self.total_energy}
         sol = sc.minimize(objective, x0, bounds=bnds, constraints=cons)
 
         a = 0.4
-        y = [self.schedule[i] - sol.get("x")[i] for i in range(FORECAST_HORIZON)]
+        # y = [self.schedule[i] - sol.get("x")[i] for i in range(FORECAST_HORIZON)]
         new_schedule = [a * sol.get("x")[i] + (1 - a) * self.schedule[i] for i in range(FORECAST_HORIZON)]
         z = [self.schedule[i] - new_schedule[i] for i in range(FORECAST_HORIZON)]
         self.schedule = new_schedule
@@ -179,7 +133,7 @@ class ProsumerAgent:
                 bids[h] = [price, qty]
                 offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
-                price = self.price_per_unit
+                price = self.marginal_price
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
                 offers[h] = [price, qty]
@@ -190,7 +144,8 @@ class ProsumerAgent:
         return np.array([bids, offers], dtype=np.float32)
 
     def step(self):
-        self.schedule = self.schedule[1:] + [0]
+        self.schedule = self.schedule[1:] + [self.load[FORECAST_HORIZON - 1]]
+        self.load = self.load[1:] + [0]
 
 
 class AggressiveSellerAgent(ProsumerAgent):

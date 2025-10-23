@@ -192,7 +192,6 @@ class DoubleAuctionEnv(Env):
             i: 0.0 for i in self.agent_ids
         }
 
-
         self.AGENT_CLASS_MAP = {
             "ProsumerAgent": ProsumerAgent,
             "AggressiveSellerAgent": AggressiveSellerAgent,
@@ -206,8 +205,7 @@ class DoubleAuctionEnv(Env):
                     agent_id=i,
                     load=config["load"],
                     generation_capacity=config["generation_capacity"],
-                    cost_per_unit=config["cost_per_unit"],
-                    margin=config["margin"],
+                    marginal_price=config["marginal_price"],
                     generation_type=config["generation_type"],
                     flexibility=config["flexibility"]
                     if "generation_type" in config
@@ -216,13 +214,13 @@ class DoubleAuctionEnv(Env):
                 )
             )
 
-        loads = [agents.load for agents in self.agents]
-        loads = list(map(list, zip(*loads)))
-        self.total_demand = [sum(loads[i]) for i in range(max_timesteps)]
+        net_demand = [agents.net_demand for agents in self.agents]
+        net_demand = list(map(list, zip(*net_demand)))
+        self.total_demand = [sum(net_demand[i]) for i in range(max_timesteps)]
 
         # --- Define Action Space (Per Agent) ---
         MAX_PRICE = 20.0
-        MAX_QTY = 50.0
+        MAX_QTY = 1000.0
 
         low_action = np.array([0.0, 0.0], dtype=np.float32)
         high_action = np.array([MAX_PRICE, MAX_QTY], dtype=np.float32)
@@ -392,7 +390,7 @@ class DoubleAuctionEnv(Env):
             agent.calculate_net_demand()
             agent.profit = 0.0
 
-        initial_forecast = [5.0] * (self.FORECAST_HORIZON - 1)
+        initial_forecast = [0.5] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info
@@ -781,7 +779,7 @@ class DoubleAuctionEnv(Env):
         timesteps = list(range(1, T + 1))
 
         # Convert to numpy arrays for convenience
-        preferred = np.array(self.total_demand, dtype=float)
+        preferred = np.array(np.abs(self.total_demand), dtype=float)
         actual = np.array(self.clearing_quantities, dtype=float)
         price_paid = np.array(self.total_price_paid_history, dtype=float)
         cumulative_paid = np.array(self.cumulative_price_paid_history, dtype=float)
@@ -880,16 +878,16 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
                 bids_arr, offers_arr
             )
             if quantity < self.discount[1]:
-                discount_price = price * self.discount[0]
-                forecasted_prices.append((price, discount_price))
+                price = price * self.discount[0]
+                forecasted_prices.append(price)
             else:
-                forecasted_prices.append((price, price))
+                forecasted_prices.append(price)
 
         return forecasted_prices
 
     @override
     def _get_obs(
-        self, price_forecast: list[tuple[float, float]]
+        self, price_forecast: list[float]
     ) -> dict[int, dict[str, np.ndarray]]:
         """Compiles dictionary observations for each agent."""
         market_stats_arr = np.array(
@@ -913,47 +911,6 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
             observations[agent_id] = {
                 "agent_state": agent_state_arr,
                 "market_stats": market_stats_arr,
-                "price_forecast": np.array([price[0] for price in price_forecast]),
-                "discount_price_forecast": np.array(
-                    [price[1] for price in price_forecast]
-                ),
+                "price_forecast": np.array([price for price in price_forecast]),
             }
         return observations
-
-    @override
-    def reset(
-        self, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[dict[int, dict[str, np.ndarray]], dict[str, Any]]:
-        """Resets the environment."""
-        super(DoubleAuctionEnv, self).reset(seed=seed)
-        self.current_timestep = 0
-        self.last_clearing_price = 5.0
-        self.last_clearing_quantity = 0.0
-        self.last_total_bids_qty = 0.0
-        self.last_total_offers_qty = 0.0
-        # --- NEW: Reset cleared >quantities ---
-        self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
-
-        (
-            self.clearing_prices,
-            self.clearing_quantities,
-            self.profit_history,
-            self.net_demand_history,
-            self.action_history,
-        ) = [], [], [], [], []
-
-        self.preferred_consumption_history = []  # total requested bids qty each timestep (MWh)
-        self.actual_consumption_history = []  # total cleared buyer qty each timestep (MWh)
-        self.total_price_paid_history = []  # clearing_price * actual_consumption (monetary units)
-        self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
-
-
-        for agent in self.agents:
-            agent.calculate_net_demand()
-            agent.profit = 0.0
-
-        initial_forecast = [(0.62, 0.62)] * (self.FORECAST_HORIZON - 1)
-        observation = self._get_obs(initial_forecast)
-        info = {"timestep": self.current_timestep}
-        return observation, info
-

@@ -34,8 +34,7 @@ def generate_agents(n=100, seed=42):
             "flexibility": random.uniform(1, 2),
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
-            "cost_per_unit": random.randint(550, 600) / 1000,
-            "margin": 1 / 50,
+            "marginal_price": random.randint(550, 600) / 1000,
         })
     return agents
 
@@ -73,8 +72,7 @@ def convert_json_agents_configs(json_agents):
             "load": j["loads"],
             "flexibility": j["flexibility"],
             "generation_capacity": int(j["generation_capacity"]),
-            "cost_per_unit": float(j["cost_per_unit"]),
-            "margin": float(j["margin"]),
+            "marginal_price": float(j["marginal_price"]),
         }
         gt = j.get("generation_type", None)
         if gt:
@@ -174,7 +172,7 @@ def main():
         agents_JSON = load_agents_from_json(path)
     else:
         # Default behavior: generate 100 with seed 42 (keeps old script's spirit)
-        agents_JSON = generate_agents(n=20, seed=42)
+        agents_JSON = generate_agents(n=25, seed=42)
         save_agents_to_json(agents_JSON, "agents_100.json")
 
     agent_configs = convert_json_agents_configs(agents_JSON)
