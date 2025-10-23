@@ -15,6 +15,7 @@ from loguru import logger
 
 MAX_STEPS = 24
 GENERATION_TYPES = ["solar", "wind", "none"]
+FORECAST_HORIZON=24
 
 
 # Function to generate agents
@@ -85,6 +86,7 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
     all_terminated = {i: False for i in env.agent_ids}
     all_truncated = {i: False for i in env.agent_ids}
     total_reward = 0.0
+    t = 1
 
     time_step = 0
     while not all(all_terminated.values()) and not all(all_truncated.values()):
@@ -102,6 +104,7 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
         current_step_reward = sum(rewards.values())
         total_reward += current_step_reward
         env.render()
+        t += 1
 
     print(f"\n--- Episode Finished ---")
     print(f"Total Cumulative Profit (All Agents): {total_reward:.2f}")

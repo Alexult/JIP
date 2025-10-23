@@ -4,8 +4,43 @@ from gymnasium.spaces import Box
 from custom_types import *
 import random
 import pandas as pd
+from loguru import logger
+import os
 
 FORECAST_HORIZON = 10
+
+
+PRICE_CSV_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "data",
+    "representative_days_wholesale_price_2025.csv",
+)
+
+
+def load_data(csv_path: str):
+    """Return dict {day_str: DataFrame(hour, price)} for each calendar day in file."""
+    df = pd.read_csv(csv_path)
+    ts_col = "Datetime (Local)"
+    p_col = "Price (EUR/MWhe)"
+
+    # Parse timestamps and split into days
+    df[ts_col] = pd.to_datetime(df[ts_col])
+    df["day"] = df[ts_col].dt.date
+    df["hour"] = df[ts_col].dt.hour
+
+    days = {}
+    for d, sub in df.groupby("day"):
+        sub = sub.sort_values("hour")[["hour", p_col]].reset_index(drop=True)
+        if len(sub) != 24:
+            print(
+                f"Warning: day {d} has {len(sub)} rows (expected 24). Using what's available."
+            )
+        days[str(d)] = sub
+    return days
+
+
+NATIONAL_MARKET_DATA = load_data(PRICE_CSV_PATH)
 
 
 class ProsumerAgent:
@@ -67,6 +102,11 @@ class ProsumerAgent:
         """
         self.net_demand = [self._calculate_demand(t + time_step) for t in range(len(self.load[time_step:time_step+FORECAST_HORIZON]))]
 
+        self.net_demand = [
+            self._calculate_demand(t + current_timestep - 1)
+            for t in range(FORECAST_HORIZON)
+        ]
+
     def _calculate_demand(self, timestep: int) -> float:
         """
         Calculates the net_demand at the timestep
@@ -94,6 +134,15 @@ class ProsumerAgent:
         actual_net_demand = np.array(self.schedule) - supply
         return initial_net_demand, actual_net_demand
 
+    def handle_after_auction(self, qty_got: float, timestep) -> float:
+        assert timestep >= 1
+        # NOTE: THE DATAFRAME HAS ONLY data for 24 hours, get more data
+        t = (timestep - 1) % 24
+        day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
+        price = day.iloc[t, 1]
+        logger.debug(f"timestep:{timestep}, net_demand: {len(self.net_demand)}")
+        qty_remaining = self.net_demand[0] - qty_got
+        return price * qty_remaining
     def devise_strategy(self, obs: dict[str, np.ndarray], action_space: Box, timestep: int, buy_tariff=0.23, sell_tariff=0.10,
                         ) -> np.ndarray:
         """
@@ -168,3 +217,72 @@ class ProsumerAgent:
                 bids[h] = [0, 0]
 
         return np.array([bids, offers], dtype=np.float32)
+
+    def step(self):
+        self.schedule = self.schedule
+        # self.schedule[1:] + [0])
+
+    def optimize_schedule(self, obs: np.ndarray) -> None:
+        self.schedule = []
+
+
+class AggressiveSellerAgent(ProsumerAgent):
+    """Aggressive seller: sells entire surplus at minimum price for all 24 hours."""
+
+    def devise_strategy_smarter(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
+        return super().devise_strategy_smarter(obs, action_space)
+        # net_demand = obs[0]
+        # last_price = obs[1]
+        #
+        # quantity = np.clip(
+        #     abs(net_demand), action_space.low[0, 1], action_space.high[0, 1]
+        # )
+        #
+        # if net_demand > 0:  # Buyer (use base logic)
+        #     price = last_price * 0.95 - 0.1
+        # elif net_demand < 0:  # Seller (Aggressive)
+        #     price = 0.01  # Offer at absolute minimum
+        # else:
+        #     price, quantity = 0.0, 0.0
+        #
+        # price = np.clip(price, action_space.low[0, 0], action_space.high[0, 0])
+        #
+        # # Create a (24, 2) array by repeating the same action 24 times
+        # action_plan = np.tile([price, quantity], (FORECAST_HORIZON, 1))
+        # return action_plan.astype(np.float32)
+
+        # bids = np.zeros((FORECAST_HORIZON, 2))
+        # offers = np.zeros((FORECAST_HORIZON, 2))
+        # x = np.array([bids, offers], dtype=np.float32)
+        # return x
+
+
+class AggressiveBuyerAgent(ProsumerAgent):
+    """Aggressive buyer: buys to cover deficit at maximum price for all 24 hours."""
+
+    def devise_strategy_smarter(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
+        return super().devise_strategy_smarter(obs, action_space)
+        # net_demand = obs[0]
+        # last_price = obs[1]
+        # MAX_PRICE = action_space.high[0, 0]
+        #
+        # quantity = np.clip(
+        #     abs(net_demand), action_space.low[0, 1], action_space.high[0, 1]
+        # )
+        #
+        # if net_demand > 0:  # Buyer (Aggressive)
+        #     price = MAX_PRICE  # Bid at absolute maximum
+        # elif net_demand < 0:  # Seller (use base logic)
+        #     price = last_price * 0.95 - 0.1
+        # else:
+        #     price, quantity = 0.0, 0.0
+        #
+        # price = np.clip(price, action_space.low[0, 0], action_space.high[0, 0])
+        #
+        # # Create a (24, 2) array by repeating the same action 24 times
+        # action_plan = np.tile([price, quantity], (FORECAST_HORIZON, 1))
+        # return action_plan.astype(np.float32)
+        # bids = np.zeros((FORECAST_HORIZON, 2))
+        # offers = np.zeros((FORECAST_HORIZON, 2))
+        # x = np.array([bids, offers], dtype=np.float32)
+        # return x
