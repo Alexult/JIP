@@ -358,7 +358,8 @@ class DoubleAuctionEnv(Env):
         self.last_clearing_quantity = 0.0
         self.last_total_bids_qty = 0.0
         self.last_total_offers_qty = 0.0
-        # --- NEW: Reset cleared >quantities ---
+
+        # --- NEW: Reset cleared quantities ---
         self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
 
         (
@@ -368,6 +369,12 @@ class DoubleAuctionEnv(Env):
             self.net_demand_history,
             self.action_history,
         ) = [], [], [], [], []
+
+         # NEW histories for consumption & costs #######################
+        self.preferred_consumption_history = []  # total requested bids qty each timestep (MWh)
+        self.actual_consumption_history = []     # total cleared buyer qty each timestep (MWh)
+        self.total_price_paid_history = []       # clearing_price * actual_consumption (monetary units)
+        self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
 
         for agent in self.agents:
             agent.calculate_net_demand()
@@ -423,6 +430,36 @@ class DoubleAuctionEnv(Env):
         clearing_price, clearing_quantity, cleared_participants = (
             self.market_agent.clear_market(bids_array, offers_array, debug=True)
         )
+
+        ########## preferred and actual consumption and cost
+        # preferred consumption = sum of all bid quantities submitted for this current hour
+        preferred_consumption = float(total_bids_qty)  # already computed above
+
+        # Determine which agent_ids were buyers (from bids_array)
+        bids_agent_ids = set()
+        if bids_array.size > 0:
+            # bids_array shape (N,3) with first column agent_id
+            bids_agent_ids = set(int(x) for x in bids_array[:, 0])
+
+        # actual consumption = sum of cleared quantities for those agents that were buyers
+        actual_consumption = 0.0
+        for agent_id, qty in cleared_participants:
+            if int(agent_id) in bids_agent_ids:
+                actual_consumption += float(qty)
+
+        # total price paid by buyers this timestep
+        total_price_paid = float(clearing_price) * actual_consumption
+
+        # append into history arrays (cumulative computed and stored)
+        self.preferred_consumption_history.append(preferred_consumption)
+        self.actual_consumption_history.append(actual_consumption)
+        self.total_price_paid_history.append(total_price_paid)
+        cumulative = (
+            (self.cumulative_price_paid_history[-1] if self.cumulative_price_paid_history else 0.0)
+            + total_price_paid
+        )
+        self.cumulative_price_paid_history.append(cumulative)
+        ############
 
         reward = self._calculate_rewards(clearing_price, cleared_participants)
 
@@ -713,3 +750,60 @@ class DoubleAuctionEnv(Env):
         plt.xlim(-0.5, 23.5)
         plt.tight_layout()
         plt.show()
+
+
+
+    def plot_consumption_and_costs(self):
+            """
+            Plots:
+            1) total preferred consumption vs total actual consumption over time
+            2) total price paid per timestep
+            3) cumulative total price paid over time
+            """
+            import matplotlib.pyplot as plt
+            import numpy as np
+
+            T = len(self.preferred_consumption_history)
+            if T == 0:
+                print("No history to plot (run an episode first).")
+                return
+
+            timesteps = list(range(1, T + 1))
+
+            # Convert to numpy arrays for convenience
+            preferred = np.array(self.preferred_consumption_history, dtype=float)
+            actual = np.array(self.actual_consumption_history, dtype=float)
+            price_paid = np.array(self.total_price_paid_history, dtype=float)
+            cumulative_paid = np.array(self.cumulative_price_paid_history, dtype=float)
+
+            # Plot 1: preferred vs actual consumption
+            plt.figure(figsize=(10, 5))
+            plt.plot(timesteps, preferred, marker="o", linestyle="-", label="Preferred (requested) consumption")
+            plt.plot(timesteps, actual, marker="o", linestyle="-", label="Actual (cleared) consumption")
+            plt.title("Total Preferred vs Actual Consumption Over Time")
+            plt.xlabel("Timestep")
+            plt.ylabel("Energy (MWh)")
+            plt.grid(True, linestyle="--", alpha=0.6)
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+
+            # Plot 2: total price paid per timestep
+            plt.figure(figsize=(10, 4))
+            plt.bar(timesteps, price_paid)
+            plt.title("Total Price Paid by Buyers per Timestep")
+            plt.xlabel("Timestep")
+            plt.ylabel("Price Paid (monetary units)")
+            plt.grid(axis="y", linestyle=":", alpha=0.6)
+            plt.tight_layout()
+            plt.show()
+
+            # Plot 3: cumulative price paid over time
+            plt.figure(figsize=(10, 4))
+            plt.plot(timesteps, cumulative_paid, marker="o", linestyle="-")
+            plt.title("Cumulative Total Price Paid Over Time")
+            plt.xlabel("Timestep")
+            plt.ylabel("Cumulative Price Paid (monetary units)")
+            plt.grid(True, linestyle="--", alpha=0.6)
+            plt.tight_layout()
+            plt.show()

@@ -34,6 +34,10 @@ def generate_agents(n=100, seed=42):
         fixed_load = random.randint(1, 30)
         generation_capacity = random.randint(0, 100)
         generation_type = random.choice(GENERATION_TYPES)
+        cost_per_unit = random.randint(1,100)
+        cost_per_unit/=100
+        margin = random.randint(1,100)
+        margin/=100
 
         agents.append({
             "id": i,
@@ -43,6 +47,8 @@ def generate_agents(n=100, seed=42):
             "fixed_load": fixed_load,
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
+            "cost_per_unit": cost_per_unit,
+            "margin": margin,
         })
     return agents
 
@@ -73,6 +79,8 @@ def convert_json_agents_configs(json_agents):
             "flexible_load": int(j["flexible_load"]),
             "fixed_load": int(j["fixed_load"]),
             "generation_capacity": int(j["generation_capacity"]),
+            "cost_per_unit": float(j['cost_per_unit']),
+            "margin": float(j['margin']),
         }
         gt = j.get("generation_type", None)
         if gt:
@@ -110,6 +118,7 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
     print(f"Total Cumulative Profit (All Agents): {total_reward:.2f}")
 
     env.plot_results()
+    env.plot_consumption_and_costs()
     env.plot_bid_ask_curves(num_plots=5)
     env.plot_price_change_for_single_day(day=0)
 
