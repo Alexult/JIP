@@ -246,6 +246,7 @@ class ProsumerAgent:
                 price = base_price * price_noise * (1 - 0.1 * (0.99) ** nd)
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
+                price = max(price, self.price_per_unit*qty)
                 offers[h] = [price, qty]
                 bids[h] = [0, 0]
 
