@@ -207,16 +207,21 @@ class ProsumerAgent:
             discount_prices, discount_prices[-1] * (1 + random.uniform(-0.1, 0.1))
         )
 
+        buy_prices = [buy_prices[h] if buy_prices[h] > 0 else buy_prices[h-1] for h in range(FORECAST_HORIZON)]
+
         sorted_buy_hours = np.argsort(buy_prices)
         sorted_sell_hours = np.argsort(sell_prices)
+
+
+
         new_schedule = self.schedule
 
         # Allocate flexible load to cheapest 25% of hours
         cheap_hours = sorted_buy_hours[: FORECAST_HORIZON // 4]
         for h in cheap_hours:
-            new_schedule[h] += 1
+            new_schedule[h] += 2
         for h in sorted_buy_hours[-FORECAST_HORIZON // 4:]:
-            new_schedule[h] -= 1
+            new_schedule[h] -= 2
 
         cost = 0
         for i, val in enumerate(self.load):
@@ -243,8 +248,7 @@ class ProsumerAgent:
                 bids[h] = [price, qty]
                 offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
-                base_price = sell_prices[h]
-                price = base_price * price_noise * (1 - 0.1 * (0.91) ** nd)
+                price = self.price_per_unit
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
                 price = max(price, self.price_per_unit)
