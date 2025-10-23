@@ -34,15 +34,15 @@ def generate_agents(n=100, seed=42):
             "flexibility": random.uniform(1, 2),
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
-            "cost_per_unit": random.random() + 0.001,
-            "margin": random.random() + 0.001,
+            "cost_per_unit": random.randint(20, 80)/100,
+            "margin": random.randint(1,4)/50,
         })
     return agents
 
 
 def generate_load(length:int):
     noise = perlin_noise.PerlinNoise(octaves=1)
-    scale = random.randrange(10, 100)
+    scale = random.randrange(50, 200)
     y = [scale * (noise(i * 0.1) + 1) for i in range(MAX_STEPS)]
     return y
 

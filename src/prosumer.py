@@ -243,11 +243,9 @@ class ProsumerAgent:
                 bids[h] = [price, qty]
                 offers[h] = [0, 0]
             elif nd < 0:  # has surplus to sell
-                base_price = sell_prices[h]
-                price = base_price * price_noise * (1 - 0.1 * (0.91) ** nd)
+                price = self.price_per_unit
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
-                price = max(price, self.price_per_unit*qty)
                 offers[h] = [price, qty]
                 bids[h] = [0, 0]
 

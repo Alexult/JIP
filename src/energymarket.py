@@ -220,7 +220,7 @@ class DoubleAuctionEnv(Env):
             )
 
         # --- Define Action Space (Per Agent) ---
-        MAX_PRICE = 10.0
+        MAX_PRICE = 20.0
         MAX_QTY = 50.0
 
         low_action = np.array([0.0, 0.0], dtype=np.float32)
@@ -971,7 +971,7 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
             agent.calculate_net_demand()
             agent.profit = 0.0
 
-        initial_forecast = [(5.0, 5.0)] * (self.FORECAST_HORIZON - 1)
+        initial_forecast = [(0.5, 0.5)] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info
