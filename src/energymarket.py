@@ -208,12 +208,11 @@ class DoubleAuctionEnv(Env):
                 AgentClass(
                     agent_id=i,
                     load=config["load"],
-                    flexible_load=config["flexible_load"],
-                    fixed_load=config["fixed_load"],
                     generation_capacity=config["generation_capacity"],
                     cost_per_unit=config["cost_per_unit"],
                     margin=config["margin"],
-                    generation_type=config["generation_type"]
+                    generation_type=config["generation_type"],
+                    flexibility=config["flexibility"]
                     if "generation_type" in config
                     and config["generation_type"] is not None
                     else "solar",
@@ -845,3 +844,135 @@ class DoubleAuctionEnv(Env):
         plt.grid(True, linestyle="--", alpha=0.6)
         plt.tight_layout()
         plt.show()
+
+
+class FlexibilityMarketEnv(DoubleAuctionEnv):
+    @override
+    def __init__(
+        self,
+        agent_configs: list[dict[str, Any]],
+        market_clearing_agent: MarketClearingAgent,
+        discount: tuple[float, float],
+        buy_tariff: float,
+        sell_tariff: float,
+        max_timesteps: int = 100,
+    ):
+        super().__init__(agent_configs, market_clearing_agent, buy_tariff, sell_tariff, max_timesteps)
+        self.costs = 0
+        self.min = 1000
+        self.discount = discount
+
+    @override
+    def _forecast_prices(self, actions: dict[int, np.ndarray]) -> list[float]:
+        """
+        Simulates market clearing for future timesteps (t+1 to t+23) based on
+        submitted actions to generate a price forecast.
+        """
+        forecasted_prices = []
+        for h in range(1, self.FORECAST_HORIZON):
+            future_bids, future_offers = [], []
+            for agent in self.agents:
+                agent_id = agent.agent_id
+                if agent_id in actions:
+                    price, quantity = actions[agent_id][0][h]
+                    if quantity == 0:
+                        price, quantity = actions[agent_id][1][h]
+                        if quantity > 0:
+                            future_offers.append((agent_id, price, quantity))
+                    else:
+                        future_bids.append((agent_id, price, quantity))
+
+            bids_arr = (
+                np.array(future_bids, dtype=float)
+                if future_bids
+                else np.empty((0, 3))
+            )
+            offers_arr = (
+                np.array(future_offers, dtype=float)
+                if future_offers
+                else np.empty((0, 3))
+            )
+
+            price, quantity, _ = self.market_agent.clear_market(
+                bids_arr, offers_arr
+            )
+            if quantity < self.discount[1]:
+                discount_price = price * self.discount[0]
+                forecasted_prices.append((price, discount_price))
+            else:
+                forecasted_prices.append((price, price))
+
+
+
+        return forecasted_prices
+
+    @override
+    def _get_obs(
+        self, price_forecast: list[tuple[float, float]]
+    ) -> dict[int, dict[str, np.ndarray]]:
+        """Compiles dictionary observations for each agent."""
+        market_stats_arr = np.array(
+            [
+                self.last_clearing_price,
+                self.last_clearing_quantity,
+                self.last_total_bids_qty,
+                self.last_total_offers_qty,
+            ],
+            dtype=np.float32,
+        )
+
+        observations: dict[int, dict[str, np.ndarray]] = {}
+        for agent in self.agents:
+            agent_id = agent.agent_id
+            agent_state_arr = np.array(
+                [self.last_cleared_quantities[agent_id]],
+                dtype=np.float32,
+            )
+
+            observations[agent_id] = {
+                "agent_state": agent_state_arr,
+                "market_stats": market_stats_arr,
+                "price_forecast": np.array([price[0] for price in price_forecast]),
+                "discount_price_forecast": np.array(
+                    [price[1] for price in price_forecast]
+                ),
+            }
+        return observations
+
+    @override
+    def reset(
+        self, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[dict[int, dict[str, np.ndarray]], dict[str, Any]]:
+        """Resets the environment."""
+        super(DoubleAuctionEnv, self).reset(seed=seed)
+        self.current_timestep = 0
+        self.last_clearing_price = 5.0
+        self.last_clearing_quantity = 0.0
+        self.last_total_bids_qty = 0.0
+        self.last_total_offers_qty = 0.0
+        # --- NEW: Reset cleared >quantities ---
+        self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
+
+        (
+            self.clearing_prices,
+            self.clearing_quantities,
+            self.profit_history,
+            self.net_demand_history,
+            self.action_history,
+        ) = [], [], [], [], []
+
+        self.preferred_consumption_history = []  # total requested bids qty each timestep (MWh)
+        self.actual_consumption_history = []  # total cleared buyer qty each timestep (MWh)
+        self.total_price_paid_history = []  # clearing_price * actual_consumption (monetary units)
+        self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
+
+
+        for agent in self.agents:
+            agent.calculate_net_demand()
+            agent.profit = 0.0
+
+        initial_forecast = [(5.0, 5.0)] * (self.FORECAST_HORIZON - 1)
+        observation = self._get_obs(initial_forecast)
+        info = {"timestep": self.current_timestep}
+        return observation, info
+
