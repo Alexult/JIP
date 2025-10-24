@@ -481,7 +481,7 @@ class DoubleAuctionEnv(Env):
         self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
         for agent_id, qty in cleared_participants:
             self.last_cleared_quantities[agent_id] = qty
-            self.agents[agent_id].handle_after_auction(qty, self.current_timestep)
+            self.agents[agent_id].handle_after_auction(qty, self.current_timestep,self.buy_tariff,self.sell_tariff)
 
         self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
