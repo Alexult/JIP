@@ -134,14 +134,22 @@ class ProsumerAgent:
         actual_net_demand = np.array(self.schedule) - supply
         return initial_net_demand, actual_net_demand
 
-    def handle_after_auction(self, qty_got: float, timestep) -> float:
+    def handle_after_auction(
+        self, qty_got: float, timestep, buy_tariff: int, sell_tariff: int
+    ) -> float:
         assert timestep >= 1
         # NOTE: THE DATAFRAME HAS ONLY data for 24 hours, get more data
         t = (timestep - 1) % 24
         day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
         price = day.iloc[t, 1]
         logger.debug(f"timestep:{timestep}, net_demand: {len(self.net_demand)}")
-        qty_remaining = self.net_demand[0] - qty_got
+        qty_remaining = 0
+        if self.net_demand[0] < 0:
+            qty_remaining = (-self.net_demand[0]) - qty_got
+            price += sell_tariff
+        else:
+            qty_remaining = self.net_demand[0] - qty_got
+            price += buy_tariff
         return price * qty_remaining
     def devise_strategy(self, obs: dict[str, np.ndarray], action_space: Box, timestep: int, buy_tariff=0.23, sell_tariff=0.10,
                         ) -> np.ndarray:
