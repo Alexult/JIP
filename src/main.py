@@ -15,7 +15,8 @@ from loguru import logger
 
 MAX_STEPS = 24
 GENERATION_TYPES = ["solar", "wind", "none"]
-FORECAST_HORIZON=24
+FORECAST_HORIZON = 24
+
 
 
 # Function to generate agents
