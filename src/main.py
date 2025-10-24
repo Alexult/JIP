@@ -17,7 +17,8 @@ from loguru import logger
 MAX_STEPS = 200
 AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
 GENERATION_TYPES = ["solar", "wind", "none"]
-FORECAST_HORIZON=24
+FORECAST_HORIZON = 24
+
 
 # Function to generate agents
 def generate_agents(n=100, seed=42):
