@@ -13,8 +13,7 @@ from energymarket import (
 )
 from loguru import logger
 
-MAX_STEPS = 48
-AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
+MAX_STEPS = 24
 GENERATION_TYPES = ["solar", "wind", "none"]
 
 
@@ -23,15 +22,12 @@ def generate_agents(n=100, seed=42):
     random.seed(seed)
     agents = []
     for i in range(n):
-        agent_class = random.choice(AGENT_CLASSES)
-        load = generate_load(MAX_STEPS)
+        load = generate_load()
         generation_capacity = random.randint(0, 100)
         generation_type = random.choice(GENERATION_TYPES)
         agents.append({
             "id": i,
-            "agent_class": agent_class,
-            "loads": load,
-            "flexibility": random.uniform(1, 2),
+            "load": load,
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
             "marginal_price": random.randint(550, 600) / 1000,
@@ -39,12 +35,10 @@ def generate_agents(n=100, seed=42):
     return agents
 
 
-def generate_load(length: int):
+def generate_load():
     noise = perlin_noise.PerlinNoise(octaves=1)
     scale = random.randrange(10, 40)
     y = [scale * (noise(i * 0.1) + 1) for i in range(MAX_STEPS)]
-    # plt.figure()
-    # plt.bar(range(24), y)
     return y
 
 
@@ -66,11 +60,8 @@ def load_agents_from_json(filename="agents_100.json"):
 def convert_json_agents_configs(json_agents):
     configs = []
     for j in json_agents:
-
         config = {
-            "class": j["agent_class"],
-            "load": j["loads"],
-            "flexibility": j["flexibility"],
+            "load": j["load"],
             "generation_capacity": int(j["generation_capacity"]),
             "marginal_price": float(j["marginal_price"]),
         }
@@ -116,9 +107,9 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
     print(f"Total Cumulative Profit (All Agents): {total_reward:.2f}")
 
     env.plot_results()
-    env.plot_consumption_and_costs()
-    env.plot_bid_ask_curves(num_plots=5)
-    env.plot_price_change_for_single_day(day=0)
+    # env.plot_consumption_and_costs()
+    # env.plot_bid_ask_curves(num_plots=5)
+    # env.plot_price_change_for_single_day(day=0)
 
 
 def parse_args():
@@ -174,7 +165,7 @@ def main():
         agents_JSON = load_agents_from_json(path)
     else:
         # Default behavior: generate 100 with seed 42 (keeps old script's spirit)
-        agents_JSON = generate_agents(n=100, seed=42)
+        agents_JSON = generate_agents(n=20, seed=41)
         save_agents_to_json(agents_JSON, "agents_100.json")
 
     agent_configs = convert_json_agents_configs(agents_JSON)
