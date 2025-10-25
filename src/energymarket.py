@@ -171,6 +171,8 @@ class DoubleAuctionEnv(Env):
             agent_configs: list[dict[str, Any]],
             market_clearing_agent: MarketClearingAgent,
             max_timesteps: int = 100,
+            buy_tariff: float = 0.1,
+            sell_tariff: int = 0.1
     ):
         super().__init__()
 
@@ -181,6 +183,8 @@ class DoubleAuctionEnv(Env):
         self.max_timesteps = max_timesteps
         self.current_timestep = 0
         self.FORECAST_HORIZON = 10
+        self.buy_tariff = buy_tariff
+        self.sell_tariff = sell_tariff
 
         # Public Market Stats
         self.last_clearing_price = 5.0
@@ -471,9 +475,9 @@ class DoubleAuctionEnv(Env):
         self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
         for agent_id, qty in cleared_participants:
             self.last_cleared_quantities[agent_id] = qty
-            self.agents[agent_id].handle_after_auction(
-                qty, self.current_timestep, self.buy_tariff, self.sell_tariff
-            )
+            # self.agents[agent_id].handle_after_auction(
+            #     qty, self.current_timestep, self.buy_tariff, self.sell_tariff
+            # )
 
         self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
@@ -832,9 +836,11 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
             market_clearing_agent: MarketClearingAgent,
             discount: tuple[float, float],
             max_timesteps: int = 100,
+            buy_tariff: float = 0.1,
+            sell_tariff: float = 0.1
     ):
         super().__init__(
-            agent_configs, market_clearing_agent, max_timesteps
+            agent_configs, market_clearing_agent, max_timesteps, buy_tariff, sell_tariff
         )
         self.costs = 0
         self.min = 1000
@@ -897,7 +903,11 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
         for agent in self.agents:
             agent_id = agent.agent_id
             agent_state_arr = np.array(
-                [self.last_cleared_quantities[agent_id]],
+                [
+                    self.last_cleared_quantities[agent_id],
+                    self.buy_tariff,
+                    self.sell_tariff,
+                ],
                 dtype=np.float32,
             )
 
