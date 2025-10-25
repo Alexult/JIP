@@ -180,7 +180,7 @@ class DoubleAuctionEnv(Env):
         self.agent_ids = list(range(self.n_agents))
         self.max_timesteps = max_timesteps
         self.current_timestep = 0
-        self.FORECAST_HORIZON = 24
+        self.FORECAST_HORIZON = 4
 
         # Public Market Stats
         self.last_clearing_price = 5.0
@@ -214,7 +214,7 @@ class DoubleAuctionEnv(Env):
                 )
             )
 
-        net_demand = [agents.net_demand for agents in self.agents]
+        net_demand = [agents.load for agents in self.agents]
         net_demand = list(map(list, zip(*net_demand)))
         self.total_demand = [sum(net_demand[i]) for i in range(max_timesteps)]
 
@@ -387,10 +387,10 @@ class DoubleAuctionEnv(Env):
         self.cumulative_price_paid_history = []  # cumulative sum over time of total_price_paid_history
 
         for agent in self.agents:
-            agent.calculate_net_demand()
+            agent.calculate_net_demand(0)
             agent.profit = 0.0
 
-        initial_forecast = [0.5] * (self.FORECAST_HORIZON - 1)
+        initial_forecast = [0.6] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info
@@ -411,7 +411,6 @@ class DoubleAuctionEnv(Env):
         - Creates a price forecast for the next 23 hours.
         - Returns observations including this forecast.
         """
-        self.current_timestep += 1
 
         # Compile Market Orders for the CURRENT HOUR (t=0)
         all_bids, all_offers = [], []
@@ -487,11 +486,13 @@ class DoubleAuctionEnv(Env):
         self.last_total_offers_qty = total_offers_qty
 
         for agent in self.agents:
-            agent.calculate_net_demand()
+            agent.calculate_net_demand(self.current_timestep)
 
-        is_truncated = self.current_timestep >= self.max_timesteps
+        is_truncated = self.current_timestep >= self.max_timesteps - 1
         terminated = {i: False for i in self.agent_ids}
         truncated = {i: is_truncated for i in self.agent_ids}
+
+        self.current_timestep += 1
 
         observation = self._get_obs(price_forecast)
 
