@@ -834,7 +834,7 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
             max_timesteps: int = 100,
     ):
         super().__init__(
-            agent_configs, market_clearing_agent, buy_tariff, sell_tariff, max_timesteps
+            agent_configs, market_clearing_agent, max_timesteps
         )
         self.costs = 0
         self.min = 1000
