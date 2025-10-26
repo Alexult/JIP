@@ -21,7 +21,16 @@
           venvDir = ".venv";
           # postShellHook = ''pip install -r requirements.txt'';
           strictDeps = false;
-          packages = with pkgs.python313Packages; [pandas matplotlib numpy ruff gymnasium loguru ipykernel];
+          packages = with pkgs.python313Packages; [
+            pandas
+            matplotlib
+            numpy
+            ruff
+            gymnasium
+            loguru
+            ipykernel
+            scipy
+          ];
         };
       };
     };
