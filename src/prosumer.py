@@ -103,11 +103,6 @@ class ProsumerAgent:
         self.net_demand = [self._calculate_demand(t + time_step) for t in
                            range(len(self.load[time_step:time_step + FORECAST_HORIZON]))]
 
-        self.net_demand = [
-            self._calculate_demand(t + current_timestep - 1)
-            for t in range(FORECAST_HORIZON)
-        ]
-
     def _calculate_demand(self, timestep: int) -> float:
         """
         Calculates the net_demand at the timestep
@@ -217,7 +212,7 @@ class ProsumerAgent:
 
         new_schedule = np.concatenate((new_schedule[:timestep], sol.get("x"), new_schedule[timestep + size:]))
 
-        a = 0.1
+        a = 0.01
         # y = [self.schedule[i] - sol.get("x")[i] for i in range(FORECAST_HORIZON)]
         if size == FORECAST_HORIZON:
             new_schedule = a * np.array(new_schedule) + (1 - a) * np.array(self.schedule)
@@ -246,7 +241,6 @@ class ProsumerAgent:
                 price = self.marginal_price
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(abs(nd), action_space.low[h, 1], action_space.high[h, 1])
-                price = max(price, self.price_per_unit)
                 offers[h] = [price, qty]
                 bids[h] = [0, 0]
 
