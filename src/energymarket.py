@@ -384,7 +384,7 @@ class DoubleAuctionEnv(Env):
 
         for agent in self.agents:
             agent.calculate_net_demand(0)
-            agent.profit = 0.0
+            agent.cost = 0.0
 
         initial_forecast = [0.6] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
@@ -427,9 +427,7 @@ class DoubleAuctionEnv(Env):
         total_offers_qty = sum(o[2] for o in all_offers)
 
         bids_array = np.array(all_bids, dtype=float) if all_bids else np.empty((0, 3))
-        offers_array = (
-            np.array(all_offers, dtype=float) if all_offers else np.empty((0, 3))
-        )
+        offers_array = np.array(all_offers, dtype=float) if all_offers else np.empty((0, 3))
         self.market_orders_history.append((bids_array.copy(), offers_array.copy()))
 
         clearing_price, clearing_quantity, cleared_participants = (
@@ -474,10 +472,12 @@ class DoubleAuctionEnv(Env):
         # --- Update last cleared quantities for the next observation ---
         self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
         for agent_id, qty in cleared_participants:
+            if agent_id in bids_agent_ids:
+                action = [x[1:] for x in bids_array if x[0] == agent_id][0]
+            else:
+                action = [[x[1] ,-x[2]] for x in offers_array if x[0] == agent_id][0]
             self.last_cleared_quantities[agent_id] = qty
-            # self.agents[agent_id].handle_after_auction(
-            #     qty, self.current_timestep, self.buy_tariff, self.sell_tariff
-            # )
+            self.agents[agent_id].purchase_from_national_market(qty, action[0], action[1], self.current_timestep)
 
         self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
@@ -842,7 +842,7 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
         super().__init__(
             agent_configs, market_clearing_agent, max_timesteps, buy_tariff, sell_tariff
         )
-        self.costs = 0
+        # self.costs = 0
         self.min = 1000
         self.discount = discount
 

@@ -15,9 +15,6 @@ from loguru import logger
 
 MAX_STEPS = 24
 GENERATION_TYPES = ["solar", "wind", "none"]
-FORECAST_HORIZON = 24
-
-
 
 # Function to generate agents
 def generate_agents(n=100, seed=42):
@@ -168,7 +165,7 @@ def main():
         agents_JSON = load_agents_from_json(path)
     else:
         # Default behavior: generate 100 with seed 42 (keeps old script's spirit)
-        agents_JSON = generate_agents(n=100, seed=41)
+        agents_JSON = generate_agents(n=25, seed=41)
         save_agents_to_json(agents_JSON, "agents_100.json")
 
     agent_configs = convert_json_agents_configs(agents_JSON)

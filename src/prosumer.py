@@ -63,11 +63,12 @@ class ProsumerAgent:
         self.generation_capacity = generation_capacity
         self.generation_type = generation_type
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
-        self.profit = 0.0
+        self.costs = [0] * len(self.load)
         self.schedule = [l for l in load]  # current schedule to buy energy. Change this to change behaviour
         self.marginal_price = marginal_price
         self.net_demand = [0] * FORECAST_HORIZON
         self.total_energy = sum(self.schedule[0:FORECAST_HORIZON])
+        self.national_consumption = [0] * len(self.load)
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
         df = pd.read_csv(generation_data_file)
@@ -129,22 +130,41 @@ class ProsumerAgent:
         actual_net_demand = np.array(self.schedule) - supply
         return initial_net_demand, actual_net_demand
 
-    def handle_after_auction(
-            self, qty_got: float, timestep, buy_tariff: int, sell_tariff: int
-    ) -> float:
-        # NOTE: THE DATAFRAME HAS ONLY data for 24 hours, get more data
-        t = (timestep) % 24
+    # def handle_after_auction(
+    #     #         self, qty_got: float, timestep, buy_tariff: int, sell_tariff: int
+    #     # ) -> float:
+    #     #     # NOTE: THE DATAFRAME HAS ONLY data for 24 hours, get more data
+    #     #     t = (timestep) % 24
+    #     #     day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
+    #     #     price = day.iloc[t + 1, 1]
+    #     #     logger.debug(f"timestep:{timestep}, net_demand: {len(self.net_demand)}")
+    #     #     qty_remaining = 0
+    #     #     if self.net_demand[0] < 0:
+    #     #         qty_remaining = (-self.net_demand[0]) - qty_got
+    #     #         price += sell_tariff
+    #     #     else:
+    #     #         qty_remaining = self.net_demand[0] - qty_got
+    #     #         price += buy_tariff
+    #     #     return price * qty_remaining
+
+    def purchase_from_national_market(self, qty_got: float, bid_price: float, bid_qty: float, timestep: int):
+        t = timestep % 24
         day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
-        price = day.iloc[t + 1, 1]
-        logger.debug(f"timestep:{timestep}, net_demand: {len(self.net_demand)}")
-        qty_remaining = 0
-        if self.net_demand[0] < 0:
-            qty_remaining = (-self.net_demand[0]) - qty_got
-            price += sell_tariff
+        price = day.iloc[t, 1]
+        cost = 0
+        qty = 0
+        if bid_qty > 0:
+            if bid_price >= price:
+                qty = (qty_got - bid_qty)
+                cost = price * qty
         else:
-            qty_remaining = self.net_demand[0] - qty_got
-            price += buy_tariff
-        return price * qty_remaining
+            if bid_price <= price:
+                qty = (qty_got + bid_qty)
+                cost = -price * qty
+
+        self.national_consumption[timestep] = qty
+        self.costs[timestep] += -cost
+        return cost
 
     def devise_strategy(self, obs: dict[str, np.ndarray], action_space: Box, timestep: int) -> np.ndarray:
         """
@@ -156,27 +176,30 @@ class ProsumerAgent:
         new_schedule = self.schedule
         x0 = new_schedule[timestep:timestep + FORECAST_HORIZON]
         size = len(x0)
+        if timestep >= 16:
+            print(self.schedule)
 
         if size == FORECAST_HORIZON and timestep > 0:
-            if obs["agent_state"][0] < 0:
-                self.total_energy = self.total_energy + self.schedule[timestep + FORECAST_HORIZON - 1] - self.schedule[
-                    timestep - 1]
-            else:
-                self.total_energy = self.total_energy + self.schedule[timestep + FORECAST_HORIZON - 1] - \
-                                    obs["agent_state"][0]
-                self.schedule[timestep - 1] = obs["agent_state"][0]
+            # if obs["agent_state"][0] < 0:
+            self.total_energy = (self.total_energy + self.schedule[timestep + FORECAST_HORIZON - 1]
+                                 - self.schedule[timestep - 1])
+            # else:
+            #     self.total_energy = (self.total_energy + self.schedule[timestep + FORECAST_HORIZON - 1]
+            #                          - obs["agent_state"][0])
+            #     self.schedule[timestep-1] = obs["agent_state"][0]
         elif timestep > 0:
-            if obs["agent_state"][0] < 0:
-                self.total_energy = self.total_energy - self.schedule[timestep - 1]
-            else:
-                self.total_energy = self.total_energy - obs["agent_state"][0]
-                self.schedule[timestep - 1] = obs["agent_state"][0]
+            # if obs["agent_state"][-1] < 0:
+            self.total_energy = self.total_energy - self.schedule[timestep - 1]
+            # else:
+            #     self.total_energy = self.total_energy - obs["agent_state"][0]
+            #     self.schedule[timestep-1] = obs["agent_state"][0]
 
         buy_prices = np.append(
             forecast_prices, forecast_prices[-1]
         )
 
-        buy_prices = [buy_prices[h] if buy_prices[h] > 0 else buy_prices[h - 1] for h in range(size)]
+        buy_prices = [buy_prices[h] if buy_prices[h] > 0 else buy_prices[h - 1] for h
+                      in range(size)]
 
         def objective(x: list) -> float:
             return sum(
@@ -189,7 +212,7 @@ class ProsumerAgent:
 
         new_schedule = np.concatenate((new_schedule[:timestep], sol.get("x"), new_schedule[timestep + size:]))
 
-        a = 0.2
+        a = 0.1
         # y = [self.schedule[i] - sol.get("x")[i] for i in range(FORECAST_HORIZON)]
         if size == FORECAST_HORIZON:
             new_schedule = a * np.array(new_schedule) + (1 - a) * np.array(self.schedule)
@@ -222,72 +245,3 @@ class ProsumerAgent:
                 bids[h] = [0, 0]
 
         return np.array([bids, offers], dtype=np.float32)
-
-    def step(self):
-        self.schedule = self.schedule
-        # self.schedule[1:] + [0])
-
-    def optimize_schedule(self, obs: np.ndarray) -> None:
-        self.schedule = []
-
-
-class AggressiveSellerAgent(ProsumerAgent):
-    """Aggressive seller: sells entire surplus at minimum price for all 24 hours."""
-
-    def devise_strategy_smarter(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
-        return super().devise_strategy_smarter(obs, action_space)
-        # net_demand = obs[0]
-        # last_price = obs[1]
-        #
-        # quantity = np.clip(
-        #     abs(net_demand), action_space.low[0, 1], action_space.high[0, 1]
-        # )
-        #
-        # if net_demand > 0:  # Buyer (use base logic)
-        #     price = last_price * 0.95 - 0.1
-        # elif net_demand < 0:  # Seller (Aggressive)
-        #     price = 0.01  # Offer at absolute minimum
-        # else:
-        #     price, quantity = 0.0, 0.0
-        #
-        # price = np.clip(price, action_space.low[0, 0], action_space.high[0, 0])
-        #
-        # # Create a (24, 2) array by repeating the same action 24 times
-        # action_plan = np.tile([price, quantity], (FORECAST_HORIZON, 1))
-        # return action_plan.astype(np.float32)
-
-        # bids = np.zeros((FORECAST_HORIZON, 2))
-        # offers = np.zeros((FORECAST_HORIZON, 2))
-        # x = np.array([bids, offers], dtype=np.float32)
-        # return x
-
-
-class AggressiveBuyerAgent(ProsumerAgent):
-    """Aggressive buyer: buys to cover deficit at maximum price for all 24 hours."""
-
-    def devise_strategy_smarter(self, obs: np.ndarray, action_space: Box) -> np.ndarray:
-        return super().devise_strategy_smarter(obs, action_space)
-        # net_demand = obs[0]
-        # last_price = obs[1]
-        # MAX_PRICE = action_space.high[0, 0]
-        #
-        # quantity = np.clip(
-        #     abs(net_demand), action_space.low[0, 1], action_space.high[0, 1]
-        # )
-        #
-        # if net_demand > 0:  # Buyer (Aggressive)
-        #     price = MAX_PRICE  # Bid at absolute maximum
-        # elif net_demand < 0:  # Seller (use base logic)
-        #     price = last_price * 0.95 - 0.1
-        # else:
-        #     price, quantity = 0.0, 0.0
-        #
-        # price = np.clip(price, action_space.low[0, 0], action_space.high[0, 0])
-        #
-        # # Create a (24, 2) array by repeating the same action 24 times
-        # action_plan = np.tile([price, quantity], (FORECAST_HORIZON, 1))
-        # return action_plan.astype(np.float32)
-        # bids = np.zeros((FORECAST_HORIZON, 2))
-        # offers = np.zeros((FORECAST_HORIZON, 2))
-        # x = np.array([bids, offers], dtype=np.float32)
-        # return x
