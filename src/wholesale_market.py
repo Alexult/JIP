@@ -1,20 +1,24 @@
 from typing import override, Any
 import numpy as np
-from custom_types import *
+from custom_types import *  # Assuming custom_types.py exists
 from gymnasium import Env
 from gymnasium.spaces import Box, Dict
-from abc import ABC, abstractmethod
-from prosumer import *
+from prosumer import ProsumerAgent  # Import the agent from prosumer.py
 import matplotlib.pyplot as plt
-import math
 from loguru import logger
 import pandas as pd
 
 
 class WholesaleMarketEnv(Env):
     """
-    Simplified wholesale market environment where agents trade at fixed wholesale prices.
-    Similar structure to DoubleAuctionEnv but without market clearing or forecasting.
+    Simplified wholesale market environment where agents act as price-takers.
+
+    Agents observe the wholesale price forecast and optimize their internal
+    consumption schedule (self.schedule) via their 'devise_strategy' method.
+
+    The environment's 'step' function then executes trades for the current
+    timestep (t=0) based on the agent's resulting 'net_demand[0]' at the
+    fixed 'current_wholesale_price'.
     """
 
     metadata = {"render_modes": ["human"], "render_fps": 30}
@@ -27,101 +31,143 @@ class WholesaleMarketEnv(Env):
     ):
         super().__init__()
 
-        self.agents: list[ProsumerAgent] = []
         self.n_agents = len(agent_configs)
         self.agent_ids = list(range(self.n_agents))
         self.max_timesteps = max_timesteps
         self.current_timestep = 0
 
         # Load wholesale prices from CSV
-        self.wholesale_df = pd.read_csv(wholesale_csv_path)
-        self.wholesale_prices = self.wholesale_df["Price (EUR/MWhe)"].values
+        try:
+            self.wholesale_df = pd.read_csv(wholesale_csv_path)
+            self.wholesale_prices = self.wholesale_df["Price (EUR/MWhe)"].values
+        except FileNotFoundError:
+            logger.error(f"Wholesale price file not found: {wholesale_csv_path}")
+            logger.warning("Using default placeholder prices.")
+            self.wholesale_prices = np.array(
+                [50.0 + 10 * np.sin(i / 4) for i in range(max(max_timesteps, 1000))]
+            )
+        self.FORECAST_HORIZON=24
 
-        # Public Market Stats (simplified - just wholesale price)
+        # Public Market Stats
         self.current_wholesale_price = (
             self.wholesale_prices[0] if len(self.wholesale_prices) > 0 else 50.0
         )
         self.last_total_traded_qty = 0.0
+        # Track last traded qty *per agent* for observation
+        self.last_agent_trades: dict[int, float] = {i: 0.0 for i in self.agent_ids}
 
-        self.AGENT_CLASS_MAP = {
-            "ProsumerAgent": ProsumerAgent,
-            "AggressiveSellerAgent": AggressiveSellerAgent,
-            "AggressiveBuyerAgent": AggressiveBuyerAgent,
-        }
-
+        # --- Initialize Agents ---
+        # We only use ProsumerAgent, as bidding strategies are irrelevant
+        self.agents: list[ProsumerAgent] = []
         for i, config in enumerate(agent_configs):
-            agent_class_name = config.get("class", "ProsumerAgent")
-            AgentClass = self.AGENT_CLASS_MAP.get(agent_class_name, ProsumerAgent)
+            if (
+                "load" not in config
+                or "generation_capacity" not in config
+                or "marginal_price" not in config
+            ):
+                raise ValueError(f"Agent config {i} is missing required keys.")
+
             self.agents.append(
-                AgentClass(
+                ProsumerAgent(
                     agent_id=i,
                     load=config["load"],
-                    flexible_load=config["flexible_load"],
-                    fixed_load=config["fixed_load"],
                     generation_capacity=config["generation_capacity"],
-                    generation_type=config["generation_type"]
-                    if "generation_type" in config
-                    and config["generation_type"] is not None
-                    else "solar",
+                    marginal_price=config["marginal_price"],
+                    generation_type=config.get("generation_type", "solar"),
                 )
             )
 
         # --- Define Action Space (Per Agent) ---
+        # This action space matches the *output* of ProsumerAgent.devise_strategy
+        # even though this env doesn't use the bids/offers.
+        # This ensures compatibility with the main.py loop.
         MAX_PRICE = 500.0
-        MAX_QTY = 50.0
+        MAX_QTY = 50.0  # Max qty per bid/offer
+        # Create the high array with the correct structure
 
-        # Simple Box action space (same structure as DoubleAuctionEnv)
+        low_action = np.array([0.0, 0.0], dtype=np.float32)
+        high_action = np.array([MAX_PRICE, MAX_QTY], dtype=np.float32)
+
         self.action_space = Box(
-            low=np.zeros((24, 2), dtype=np.float32),
-            high=np.array([[MAX_PRICE, MAX_QTY]] * 24, dtype=np.float32),
-            shape=(24, 2),
+            low=np.tile(low_action, (self.FORECAST_HORIZON, 1)),
+            high=np.tile(high_action, (self.FORECAST_HORIZON, 1)),
+            shape=(self.FORECAST_HORIZON, 2),
             dtype=np.float32,
         )
 
-        # --- MODIFIED: Define Observation Space as a Dictionary ---
-        MAX_DEMAND_ABS = max(max(c.schedule) for c in self.agents)
-        MAX_CAPACITY = max(c["generation_capacity"] for c in agent_configs)
+        # --- Define Observation Space (Per Agent) ---
+        MAX_DEMAND_ABS = (
+            max(max(c.schedule) for c in self.agents) if self.agents else 100.0
+        )
+        MAX_CAPACITY = (
+            max(c.generation_capacity for c in self.agents) if self.agents else 100.0
+        )
         MAX_NET_DEMAND = MAX_DEMAND_ABS
         MIN_NET_DEMAND = -MAX_CAPACITY
-        MAX_SUM_QTY = self.n_agents * MAX_QTY
+        MAX_TRADED_QTY = max(MAX_NET_DEMAND, abs(MIN_NET_DEMAND))
+        MAX_TOTAL_TRADED = self.n_agents * MAX_TRADED_QTY
+        MAX_WH_PRICE = 1000.0
+        MIN_WH_PRICE = -100.0
 
         self.observation_space = Dict(
             {
-                # Agent State: [Net Demand, Last Cleared Qty]
-                "agent_state": Box(low=0.0, high=MAX_QTY, shape=(1,), dtype=np.float32),
-                # Market Stats: [P_t-1, Q_t-1, Sum_Bids_t-1, Sum_Offers_t-1]
-                "market_stats": Box(
-                    low=np.array([0.0, 0.0], dtype=np.float32),
-                    high=np.array(
-                        [MAX_PRICE, 1000.0], dtype=np.float32
-                    ),  # [price, total_traded]
+                # Agent State: [Net Demand (t=0), Last Traded Qty (agent)]
+                "agent_state": Box(
+                    low=np.array([MIN_NET_DEMAND, -MAX_TRADED_QTY], dtype=np.float32),
+                    high=np.array([MAX_NET_DEMAND, MAX_TRADED_QTY], dtype=np.float32),
                     shape=(2,),
                     dtype=np.float32,
                 ),
+                # Market Stats: [Wholesale Price (t), Total Traded Qty (t-1)]
+                "market_stats": Box(
+                    low=np.array([MIN_WH_PRICE, 0.0], dtype=np.float32),
+                    high=np.array([MAX_WH_PRICE, MAX_TOTAL_TRADED], dtype=np.float32),
+                    shape=(2,),
+                    dtype=np.float32,
+                ),
+                # Price Forecast for next 23 hours (t+1 ... t+23)
                 "price_forecast": Box(
-                    low=np.array([-100.0] * 23, dtype=np.float32),
-                    high=np.array([500.0] * 23, dtype=np.float32),
+                    low=MIN_WH_PRICE,
+                    high=MAX_WH_PRICE,
                     shape=(23,),
                     dtype=np.float32,
                 ),
             }
         )
 
-        # History tracking (similar to DoubleAuctionEnv)
+        # History tracking
         self.wholesale_prices_history: list[float] = []
-        self.traded_quantities: list[float] = []
-        self.profit_history = []
-        self.net_demand_history = []
-        self.agent_trades_history = []  # Track individual agent trades
+        self.traded_quantities_history: list[float] = []  # Total traded
+        self.profit_history: list[np.ndarray] = []  # Per agent
+        self.net_demand_history: list[list[float]] = []  # Per agent
+        self.agent_trades_history: list[list[dict]] = []  # Full trade info
 
-        print(f"WholesaleMarketEnv initialized with {self.n_agents} agents")
-        print(f"Loaded {len(self.wholesale_prices)} wholesale prices")
-        print(
-            f"Price range: €{min(self.wholesale_prices):.2f} - €{max(self.wholesale_prices):.2f}"
-        )
+        logger.info(f"WholesaleMarketEnv initialized with {self.n_agents} agents")
+        if len(self.wholesale_prices) > 0:
+            logger.info(f"Loaded {len(self.wholesale_prices)} wholesale prices")
+            logger.info(
+                f"Price range: €{min(self.wholesale_prices):.2f} - €{max(self.wholesale_prices):.2f}"
+            )
+
+    def _get_wholesale_price_forecast(self) -> list[float]:
+        """Get next 23 hours of wholesale prices for agent planning."""
+        # Forecast for t+1 to t+23
+        start_idx = self.current_timestep + 1
+        end_idx = start_idx + 23
+
+        prices = []
+        if len(self.wholesale_prices) > 0:
+            prices = list(self.wholesale_prices[start_idx:end_idx])
+            # Pad if simulation runs longer than price data
+            while len(prices) < 23:
+                prices.append(self.wholesale_prices[-1])
+        else:
+            prices = [50.0] * 23  # Default if no data
+
+        return prices
 
     def _get_obs(self) -> dict[int, dict[str, np.ndarray]]:
-        """Get observations for all agents (simplified)."""
+        """Get observations for all agents."""
         market_stats_arr = np.array(
             [
                 self.current_wholesale_price,
@@ -130,7 +176,7 @@ class WholesaleMarketEnv(Env):
             dtype=np.float32,
         )
 
-        # Get next 24 hours of wholesale prices for forecast
+        # Get next 23 hours of wholesale prices for forecast
         price_forecast = self._get_wholesale_price_forecast()
         price_forecast_arr = np.array(price_forecast, dtype=np.float32)
 
@@ -138,13 +184,13 @@ class WholesaleMarketEnv(Env):
         for agent in self.agents:
             agent_id = agent.agent_id
 
-            # Handle net_demand properly
-            if isinstance(agent.net_demand, list):
-                net_demand_value = sum(agent.net_demand) if agent.net_demand else 0.0
-            else:
-                net_demand_value = float(agent.net_demand)
+            # Get agent's net demand for the current hour (t=0 of their plan)
+            # This value was set by agent.devise_strategy()
+            current_net_demand = agent.net_demand[0] if agent.net_demand else 0.0
 
-            agent_state_arr = np.array([abs(net_demand_value)], dtype=np.float32)
+            agent_state_arr = np.array(
+                [current_net_demand, self.last_agent_trades[agent_id]], dtype=np.float32
+            )
 
             observations[agent_id] = {
                 "agent_state": agent_state_arr,
@@ -154,22 +200,6 @@ class WholesaleMarketEnv(Env):
 
         return observations
 
-    def _get_wholesale_price_forecast(self) -> list[float]:
-        """Get next 24 hours of wholesale prices for agent planning."""
-        start_idx = self.current_timestep
-        end_idx = min(start_idx + 24, len(self.wholesale_prices))
-
-        # Get available prices
-        prices = list(self.wholesale_prices[start_idx:end_idx])
-
-        # Ensure forecast is exactly 24 hours
-        while len(prices) < 24:
-            prices.append(
-                self.wholesale_prices[-1] if len(self.wholesale_prices) > 0 else 50.0
-            )
-
-        return prices[:23]  # Ensure exactly 24 prices
-
     def _calculate_rewards(self, trades: list[dict]) -> dict[int, float]:
         """Calculate rewards based on wholesale trading"""
         rewards: dict[int, float] = {agent_id: 0.0 for agent_id in self.agent_ids}
@@ -177,22 +207,32 @@ class WholesaleMarketEnv(Env):
         for trade in trades:
             agent_id = trade["agent_id"]
             trade_value = trade["trade_value"]
-            rewards[agent_id] = trade_value  # Positive for selling, negative for buying
+            rewards[agent_id] = (
+                trade_value  # Positive for selling (revenue), negative for buying (cost)
+            )
 
         return rewards
 
     def _execute_wholesale_trading(self) -> list[dict]:
-        """Execute wholesale trading for all agents at current wholesale price"""
+        """
+        Execute wholesale trading for all agents at current wholesale price.
+        This function READS the agent's state (net_demand[0]), which was
+        set by the agent.devise_strategy() call in the main loop.
+        """
         trades = []
         total_traded = 0.0
 
-        for agent in self.agents:
-            agent.calculate_net_demand()
+        # Reset per-agent trade tracker for this step
+        self.last_agent_trades = {i: 0.0 for i in self.agent_ids}
 
-            if isinstance(agent.net_demand, list):
-                net_demand = sum(agent.net_demand) if agent.net_demand else 0.0
-            else:
-                net_demand = float(agent.net_demand)
+        for agent in self.agents:
+            # Get the net demand for the *current hour*
+            # This was calculated by the agent's strategy in the main loop
+            net_demand = agent.net_demand[0] if agent.net_demand else 0.0
+
+            trade_value = 0.0
+            action_type = "none"
+            trade_quantity = abs(net_demand)
 
             # In wholesale market, agent trades their net demand/surplus at wholesale price
             if net_demand > 0:
@@ -201,28 +241,33 @@ class WholesaleMarketEnv(Env):
                     -net_demand * self.current_wholesale_price
                 )  # Negative (cost)
                 action_type = "buy"
+                self.last_agent_trades[agent.agent_id] = (
+                    net_demand  # Positive for bought
+                )
             elif net_demand < 0:
                 # Agent has surplus energy (selling)
                 trade_value = (
                     -net_demand * self.current_wholesale_price
                 )  # Positive (revenue)
                 action_type = "sell"
+                self.last_agent_trades[agent.agent_id] = net_demand  # Negative for sold
             else:
                 # No trading needed
                 trade_value = 0.0
                 action_type = "none"
+                self.last_agent_trades[agent.agent_id] = 0.0
 
             trade_info = {
                 "agent_id": agent.agent_id,
                 "net_demand": net_demand,
-                "trade_quantity": abs(net_demand),
-                "trade_value": trade_value,
+                "trade_quantity": trade_quantity,
+                "trade_value": trade_value,  # Cost (-) or Revenue (+)
                 "wholesale_price": self.current_wholesale_price,
                 "action_type": action_type,
             }
 
             trades.append(trade_info)
-            total_traded += abs(net_demand)
+            total_traded += trade_quantity
 
         self.last_total_traded_qty = total_traded
         return trades
@@ -238,18 +283,21 @@ class WholesaleMarketEnv(Env):
             self.wholesale_prices[0] if len(self.wholesale_prices) > 0 else 50.0
         )
         self.last_total_traded_qty = 0.0
+        self.last_agent_trades = {i: 0.0 for i in self.agent_ids}
 
         # Reset history
         self.wholesale_prices_history = []
-        self.traded_quantities = []
+        self.traded_quantities_history = []
         self.profit_history = []
         self.net_demand_history = []
         self.agent_trades_history = []
 
-        # Reset agents
+        # Reset agents and calculate initial net demand
         for agent in self.agents:
-            agent.calculate_net_demand()  # Let agents handle their own reset logic
-            agent.profit = 0.0
+            agent.calculate_net_demand(
+                0
+            )  # Let agents calculate their t=0 to t=23 demand
+            agent.costs = [0] * len(agent.load)  # Reset agent's internal cost tracker
 
         observation = self._get_obs()
         info = {"timestep": self.current_timestep}
@@ -264,38 +312,57 @@ class WholesaleMarketEnv(Env):
         dict[int, bool],
         dict[str, Any],
     ]:
-        """Step the environment forward."""
-        self.current_timestep += 1
-        self.current_wholesale_price = (
-            self.wholesale_prices[self.current_timestep]
-            if self.current_timestep < len(self.wholesale_prices)
-            else self.wholesale_prices[-1]
-        )
+        """
+        Step the environment forward.
 
-        # Let agents adjust their strategies based on the wholesale price
-        for agent_id, agent in enumerate(self.agents):
-            obs = self._get_obs()[agent_id]
-            agent_action = agent.devise_strategy_smarter(obs, self.action_space)
-            # print(f"Agent {agent_id} action: {agent_action}")
+        NOTE: The 'actions' parameter is ignored. The main.py loop calls
+        agent.devise_strategy() which updates the agent's internal 'self.schedule'
+        and 'self.net_demand'. This 'step' function simply reads that
+        updated state and executes the trades for t=0.
+        """
 
-        # Execute wholesale trading (no bidding/clearing in WholesaleMarketEnv)
+        # Execute wholesale trading based on agent's current state
+        # (which was set by devise_strategy in the main loop)
         trades = self._execute_wholesale_trading()
 
         # Calculate rewards
         rewards = self._calculate_rewards(trades)
 
+        # Update agent's internal cost tracker
+        for trade in trades:
+            agent_id = trade["agent_id"]
+            # trade_value is cost (negative) or revenue (positive)
+            # agent.costs expects costs to be positive numbers
+            cost = -trade["trade_value"]
+            self.agents[agent_id].costs[self.current_timestep] = cost
+
         # Update history
         self.wholesale_prices_history.append(self.current_wholesale_price)
-        self.traded_quantities.append(self.last_total_traded_qty)
+        self.traded_quantities_history.append(self.last_total_traded_qty)
         self.profit_history.append(np.array(list(rewards.values())))
-        self.net_demand_history.append([agent.net_demand for agent in self.agents])
+        self.net_demand_history.append([agent.net_demand[0] for agent in self.agents])
+        self.agent_trades_history.append(trades)
 
+        # Update timestep and price for the *next* step
+        self.current_timestep += 1
         is_truncated = self.current_timestep >= self.max_timesteps
+
+        if not is_truncated and self.current_timestep < len(self.wholesale_prices):
+            self.current_wholesale_price = self.wholesale_prices[self.current_timestep]
+        elif len(self.wholesale_prices) > 0:
+            self.current_wholesale_price = self.wholesale_prices[
+                -1
+            ]  # Use last known price
+        else:
+            self.current_wholesale_price = 50.0  # Default
+
         terminated = {i: False for i in self.agent_ids}
         truncated = {i: is_truncated for i in self.agent_ids}
 
+        # Get observations for the *next* state
         observation = self._get_obs()
-        info = {"timestep": self.current_timestep}
+        info = {"timestep": self.current_timestep, "trades": trades}
+
         return (
             observation,
             rewards,
@@ -312,27 +379,16 @@ class WholesaleMarketEnv(Env):
             )
             logger.info(
                 f"T={self.current_timestep:02d} | Wholesale Price=€{self.current_wholesale_price:.2f} | "
-                f"Total Traded={self.last_total_traded_qty:.2f} MWh | Total Rewards=€{last_total_reward:.2f}"
+                f"Total Traded={self.last_total_traded_qty:.2f} MWh | Step Rewards=€{last_total_reward:.2f}"
             )
 
-    def get_agent_color(self, agent_id: int) -> str:
-        """Returns a color based on the agent's class name (same as DoubleAuctionEnv)"""
-        agent_class_name = type(self.agents[agent_id]).__name__
-        if agent_class_name == "AggressiveSellerAgent":
-            return "r"
-        elif agent_class_name == "AggressiveBuyerAgent":
-            return "m"
-        elif agent_class_name == "ProsumerAgent":
-            return "b"
-        return "k"
-
-    def get_class_label(self, agent_id: int) -> str:
-        """Returns the agent's class name for legend purposes"""
-        return type(self.agents[agent_id]).__name__
-
     def plot_results(self):
-        """Generate plots similar to DoubleAuctionEnv results"""
-        timesteps = range(1, self.current_timestep + 1)
+        """Generate plots for wholesale market results"""
+        if not self.profit_history:
+            logger.warning("No history to plot. Run a simulation first.")
+            return
+
+        timesteps = range(1, len(self.wholesale_prices_history) + 1)
 
         # Plot 1: Wholesale Price and Total Traded Quantity Over Time
         plt.figure(figsize=(12, 5))
@@ -351,7 +407,11 @@ class WholesaleMarketEnv(Env):
 
         plt.subplot(1, 2, 2)
         plt.plot(
-            timesteps, self.traded_quantities, marker="o", linestyle="-", color="purple"
+            timesteps,
+            self.traded_quantities_history,
+            marker="o",
+            linestyle="-",
+            color="purple",
         )
         plt.title("Total Traded Quantity Over Time")
         plt.xlabel("Timestep")
@@ -362,26 +422,16 @@ class WholesaleMarketEnv(Env):
         # Plot 2: Cumulative Profit/Loss per Agent
         plt.figure(figsize=(10, 6))
         profit_matrix = np.array(self.profit_history)
-        plotted_classes = set()
 
         for i in range(self.n_agents):
             cumulative_profit = np.cumsum(profit_matrix[:, i])
-            agent_class_name = self.get_class_label(i)
-            color = self.get_agent_color(i)
-
-            if agent_class_name not in plotted_classes:
-                label = f"{agent_class_name} (Agent {i})"
-                plotted_classes.add(agent_class_name)
-            else:
-                label = f"Agent {i}"
-
+            # Simple coloring by agent ID
             plt.plot(
                 timesteps,
                 cumulative_profit,
-                marker="o",
+                marker=".",
                 linestyle="-",
-                label=label,
-                color=color,
+                label=f"Agent {i}",
                 alpha=0.7,
             )
 
@@ -389,12 +439,13 @@ class WholesaleMarketEnv(Env):
         plt.xlabel("Timestep")
         plt.ylabel("Cumulative Profit/Loss (€)")
         plt.grid(True)
-        plt.legend()
+        if self.n_agents <= 20:  # Only show legend if not too crowded
+            plt.legend()
         plt.tight_layout()
         plt.show()
 
     def plot_price_change_for_single_day(self, day: int = 0):
-        """Plot wholesale price for each hour of a specific day (same as DoubleAuctionEnv)"""
+        """Plot wholesale price for each hour of a specific day"""
         plt.figure(figsize=(10, 5))
         start_index, end_index = day * 24, (day + 1) * 24
 
@@ -402,8 +453,14 @@ class WholesaleMarketEnv(Env):
             print(f"Simulation has not reached day {day}. No data to plot.")
             return
 
+        # Ensure we don't try to plot data that hasn't happened yet
+        end_index = min(end_index, len(self.wholesale_prices_history))
         daily_prices = self.wholesale_prices_history[start_index:end_index]
         hours = range(len(daily_prices))
+
+        if not daily_prices:
+            print(f"No price history found for Day {day}.")
+            return
 
         plt.plot(hours, daily_prices, marker="o", linestyle="-", color="orange")
         plt.title(f"Wholesale Price vs. Hour for Day {day}")
