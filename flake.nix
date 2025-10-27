@@ -30,7 +30,8 @@
             loguru
             ipykernel
             scipy
-          ];
+            gprof2dot
+          ] ++ [pkgs.graphviz];
         };
       };
     };

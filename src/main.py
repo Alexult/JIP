@@ -30,7 +30,7 @@ def generate_agents(n=100, seed=42):
             "load": load,
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
-            "marginal_price": random.randint(550, 600) / 1000,
+            "marginal_price": random.randint(1000, 1500) / 10000,
         })
     return agents
 
@@ -106,7 +106,7 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
 
     print(f"\n--- Episode Finished ---")
     print(f"Total Cumulative Profit (All Agents): {total_reward:.2f}")
-
+    logger.debug(f"CLWARING PRICES: {env.clearing_prices}")
     env.plot_results()
     # env.plot_consumption_and_costs()
     # env.plot_bid_ask_curves(num_plots=5)

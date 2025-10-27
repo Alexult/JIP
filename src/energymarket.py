@@ -387,7 +387,7 @@ class DoubleAuctionEnv(Env):
             agent.calculate_net_demand(0)
             agent.cost = 0.0
 
-        initial_forecast = [0.6] * (self.FORECAST_HORIZON - 1)
+        initial_forecast = [0.1] * (self.FORECAST_HORIZON - 1)
         observation = self._get_obs(initial_forecast)
         info = {"timestep": self.current_timestep}
         return observation, info
@@ -432,7 +432,7 @@ class DoubleAuctionEnv(Env):
         self.market_orders_history.append((bids_array.copy(), offers_array.copy()))
 
         clearing_price, clearing_quantity, cleared_participants = (
-            self.market_agent.clear_market(bids_array, offers_array, debug=True)
+            self.market_agent.clear_market(bids_array, offers_array, debug=False)
         )
 
         ########## preferred and actual consumption and cost
