@@ -13,40 +13,34 @@ from energymarket import (
 )
 from loguru import logger
 
-MAX_STEPS = 200
-AGENT_CLASSES = ["AggressiveSellerAgent", "AggressiveBuyerAgent", "ProsumerAgent"]
+MAX_STEPS = 24
 GENERATION_TYPES = ["solar", "wind", "none"]
+
 
 # Function to generate agents
 def generate_agents(n=100, seed=42):
     random.seed(seed)
     agents = []
     for i in range(n):
-
-        agent_class = random.choice(AGENT_CLASSES)
-        load = generate_load(MAX_STEPS)
+        load = generate_load()
         generation_capacity = random.randint(0, 100)
         generation_type = random.choice(GENERATION_TYPES)
         agents.append({
             "id": i,
-            "agent_class": agent_class,
-            "loads": load,
-            "flexibility": random.uniform(1, 2),
+            "load": load,
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
-            "cost_per_unit": random.randint(550, 600)/1000,
-            "margin": 1/50,
+            "marginal_price": random.randint(550, 600) / 1000,
         })
     return agents
 
 
-def generate_load(length:int):
+def generate_load():
     noise = perlin_noise.PerlinNoise(octaves=1)
-    scale = random.randrange(10, 40)
+    scale = random.randrange(10, 50)
     y = [scale * (noise(i * 0.1) + 1) for i in range(MAX_STEPS)]
-    # plt.figure()
-    # plt.bar(range(24), y)
     return y
+
 
 # Save agents to JSON
 def save_agents_to_json(agents, filename="agents_100.json"):
@@ -55,23 +49,21 @@ def save_agents_to_json(agents, filename="agents_100.json"):
     print(f"Stored {len(agents)} agents in {filename}")
     return filename
 
+
 # Load agents from JSON
 def load_agents_from_json(filename="agents_100.json"):
     with open(filename, "r") as f:
         return json.load(f)
 
+
 # Convert JSON agents -> AGENT_CONFIGS
 def convert_json_agents_configs(json_agents):
     configs = []
     for j in json_agents:
-
         config = {
-            "class": j["agent_class"],
-            "load": j["loads"],
-            "flexibility": j["flexibility"],
+            "load": j["load"],
             "generation_capacity": int(j["generation_capacity"]),
-            "cost_per_unit": float(j["cost_per_unit"]),
-            "margin": float(j["margin"]),
+            "marginal_price": float(j["marginal_price"]),
         }
         gt = j.get("generation_type", None)
         if gt:
@@ -79,14 +71,15 @@ def convert_json_agents_configs(json_agents):
         configs.append(config)
     return configs
 
+
 def run_episode(agent_configs, max_steps=MAX_STEPS):
     env = FlexibilityMarketEnv(
         agent_configs=agent_configs,
         market_clearing_agent=DoubleAuctionClearingAgent(),
         discount=(1, 1000),
         max_timesteps=max_steps,
-        buy_tariff=0.23,
-        sell_tariff=0.10,
+        buy_tariff=0.1,
+        sell_tariff=0.1
     )
 
     logger.info(f"Starting MARL Episode Demo ({max_steps} steps)")
@@ -94,27 +87,31 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
     all_terminated = {i: False for i in env.agent_ids}
     all_truncated = {i: False for i in env.agent_ids}
     total_reward = 0.0
+    t = 1
 
+    time_step = 0
     while not all(all_terminated.values()) and not all(all_truncated.values()):
+
         actions = {}
         for agent_id in env.agent_ids:
             obs_i = observations[agent_id]
-            actions[agent_id] = env.agents[agent_id].devise_strategy_smarter(
-                obs_i, env.action_space
-            )
+            actions[agent_id] = env.agents[agent_id].devise_strategy(obs_i, env.action_space, time_step)
+        time_step += 1
 
         observations, rewards, all_terminated, all_truncated, info = env.step(actions)
         current_step_reward = sum(rewards.values())
         total_reward += current_step_reward
         env.render()
+        t += 1
 
     print(f"\n--- Episode Finished ---")
     print(f"Total Cumulative Profit (All Agents): {total_reward:.2f}")
 
     env.plot_results()
-    env.plot_consumption_and_costs()
-    env.plot_bid_ask_curves(num_plots=5)
-    env.plot_price_change_for_single_day(day=0)
+    # env.plot_consumption_and_costs()
+    # env.plot_bid_ask_curves(num_plots=5)
+    # env.plot_price_change_for_single_day(day=0)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -152,6 +149,7 @@ def parse_args():
     )
     return parser.parse_args()
 
+
 def main():
     args = parse_args()
 
@@ -168,11 +166,12 @@ def main():
         agents_JSON = load_agents_from_json(path)
     else:
         # Default behavior: generate 100 with seed 42 (keeps old script's spirit)
-        agents_JSON = generate_agents(n=100, seed=42)
+        agents_JSON = generate_agents(n=50, seed=42)
         save_agents_to_json(agents_JSON, "agents_100.json")
 
     agent_configs = convert_json_agents_configs(agents_JSON)
     run_episode(agent_configs, max_steps=args.steps)
+
 
 if __name__ == "__main__":
     main()

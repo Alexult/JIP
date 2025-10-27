@@ -15,12 +15,22 @@
       systems = ["x86_64-linux"];
       perSystem = {system, ...}: let
         pkgs = import nixpkgs {inherit system;};
+        gymnasium = pkgs.python313Packages.gymnasium.overridePythonAttrs {doCheck = false;};
       in {
         devShells.default = pkgs.mkShell {
           venvDir = ".venv";
           # postShellHook = ''pip install -r requirements.txt'';
           strictDeps = false;
-          packages = with pkgs.python313Packages; [pandas matplotlib numpy ruff networkx gymnasium loguru ipykernel];
+          packages = with pkgs.python313Packages; [
+            pandas
+            matplotlib
+            numpy
+            ruff
+            gymnasium
+            loguru
+            ipykernel
+            scipy
+          ];
         };
       };
     };
