@@ -7,7 +7,7 @@ import pandas as pd
 from loguru import logger
 import os
 
-FORECAST_HORIZON = 10
+FORECAST_HORIZON = 24
 
 PRICE_CSV_PATH = os.path.join(
     os.path.dirname(__file__),
@@ -116,7 +116,7 @@ class ProsumerAgent:
             effective_generation = self._calc_wind_generation(hour_of_day)
         return self.schedule[timestep] - effective_generation
 
-    def get_demand_consumption(self) -> tuple[list[float], list[float]]:
+    def get_demand_consumption(self) -> tuple[list[float], list[float], list[float]]:
         time_steps = len(self.load)
 
         supply = np.zeros(time_steps)
@@ -128,7 +128,7 @@ class ProsumerAgent:
                                      self.wind_data[:time_steps % 24])) * self.multiplicative_factor[1]
         initial_net_demand = np.array(self.load) - supply
         actual_net_demand = np.array(self.schedule) - supply
-        return initial_net_demand, actual_net_demand
+        return initial_net_demand, actual_net_demand, supply
 
     # def handle_after_auction(
     #     #         self, qty_got: float, timestep, buy_tariff: int, sell_tariff: int
@@ -151,17 +151,15 @@ class ProsumerAgent:
         t = timestep % 24
         day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
         price = day.iloc[t, 1]
-        cost = 0
         qty = 0
         if bid_qty > 0:
             if bid_price >= price:
-                qty = (qty_got - bid_qty)
-                cost = price * qty
+                qty = qty_got - bid_qty
         else:
             if bid_price <= price:
-                qty = (qty_got + bid_qty)
-                cost = -price * qty
+                qty = bid_qty - qty_got
 
+        cost = price * qty
         self.national_consumption[timestep] = qty
         self.costs[timestep] += -cost
         return cost
@@ -176,8 +174,6 @@ class ProsumerAgent:
         new_schedule = self.schedule
         x0 = new_schedule[timestep:timestep + FORECAST_HORIZON]
         size = len(x0)
-        if timestep >= 16:
-            print(self.schedule)
 
         if size == FORECAST_HORIZON and timestep > 0:
             # if obs["agent_state"][0] < 0:
@@ -198,8 +194,8 @@ class ProsumerAgent:
             forecast_prices, forecast_prices[-1]
         )
 
-        buy_prices = [buy_prices[h] if buy_prices[h] > 0 else buy_prices[h - 1] for h
-                      in range(size)]
+        buy_prices = [buy_prices[h] if buy_prices[h] > 0 else buy_prices[h - 1] for
+                      h in range(size)]
 
         def objective(x: list) -> float:
             return sum(
@@ -212,10 +208,9 @@ class ProsumerAgent:
 
         new_schedule = np.concatenate((new_schedule[:timestep], sol.get("x"), new_schedule[timestep + size:]))
 
-        a = 0.01
+        a = 0.005
         # y = [self.schedule[i] - sol.get("x")[i] for i in range(FORECAST_HORIZON)]
-        if size == FORECAST_HORIZON:
-            new_schedule = a * np.array(new_schedule) + (1 - a) * np.array(self.schedule)
+        new_schedule[timestep:] = a * np.array(new_schedule)[timestep:] + (1 - a) * np.array(self.schedule)[timestep:]
         z = [val - new_schedule[i] for i, val in enumerate(self.schedule)]
         self.schedule = new_schedule
 

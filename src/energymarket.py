@@ -182,7 +182,7 @@ class DoubleAuctionEnv(Env):
         self.agent_ids = list(range(self.n_agents))
         self.max_timesteps = max_timesteps
         self.current_timestep = 0
-        self.FORECAST_HORIZON = 10
+        self.FORECAST_HORIZON = 24
         self.buy_tariff = buy_tariff
         self.sell_tariff = sell_tariff
 
@@ -762,14 +762,16 @@ class DoubleAuctionEnv(Env):
         if T == 0:
             print("No history to plot (run an episode first).")
             return
-        timesteps = list(range(1, T))
+        timesteps = list(range(1, T+1))
 
         initial_net_demand = np.zeros(T)
         actual_net_demand = np.zeros(T)
+        total_generation = np.zeros(T)
         for agent in self.agents:
-            init, actual = agent.get_demand_consumption()
+            init, actual, supply = agent.get_demand_consumption()
             initial_net_demand = [initial_net_demand[i] + val for i, val in enumerate(init)]
             actual_net_demand = [actual_net_demand[i] + val for i, val in enumerate(actual)]
+            total_generation = [total_generation[i] + val for i, val in enumerate(supply)]
 
 
         # print(f"required energy {sum(initial_net_demand)}")
@@ -787,14 +789,14 @@ class DoubleAuctionEnv(Env):
         plt.figure(figsize=(10, 5))
         plt.plot(
             timesteps,
-            initial_net_demand[:-1],
+            initial_net_demand,
             marker="o",
             linestyle="-",
             label="Preferred net demand",
         )
         plt.plot(
             timesteps,
-            actual_net_demand[:-1],
+            actual_net_demand,
             marker="o",
             linestyle="-",
             label="Actual net demand",
@@ -807,25 +809,36 @@ class DoubleAuctionEnv(Env):
         plt.tight_layout()
         plt.show()
 
+
+
         # # Plot 2: total price paid per timestep
-        # plt.figure(figsize=(10, 4))
-        # plt.bar(timesteps, price_paid)
-        # plt.title("Total Price Paid by Buyers per Timestep")
-        # plt.xlabel("Timestep")
-        # plt.ylabel("Price Paid (monetary units)")
-        # plt.grid(axis="y", linestyle=":", alpha=0.6)
-        # plt.tight_layout()
-        # # plt.show()
-        #
-        # # Plot 3: cumulative price paid over time
-        # plt.figure(figsize=(10, 4))
-        # plt.plot(timesteps, cumulative_paid, marker="o", linestyle="-")
-        # plt.title("Cumulative Total Price Paid Over Time")
-        # plt.xlabel("Timestep")
-        # plt.ylabel("Cumulative Price Paid (monetary units)")
-        # plt.grid(True, linestyle="--", alpha=0.6)
-        # plt.tight_layout()
-        # plt.show()
+        plt.figure(figsize=(10, 4))
+        plt.bar(timesteps, price_paid)
+        plt.title("Total Price Paid by Buyers per Timestep")
+        plt.xlabel("Timestep")
+        plt.ylabel("Price Paid (monetary units)")
+        plt.grid(axis="y", linestyle=":", alpha=0.6)
+        plt.tight_layout()
+        plt.show()
+
+        # Plot 3: cumulative price paid over time
+        plt.figure(figsize=(10, 4))
+        plt.plot(timesteps, cumulative_paid, marker="o", linestyle="-")
+        plt.title("Cumulative Total Price Paid Over Time")
+        plt.xlabel("Timestep")
+        plt.ylabel("Cumulative Price Paid (monetary units)")
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.tight_layout()
+        plt.show()
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(timesteps, total_generation, marker="o", linestyle="-")
+        plt.title("Energy generation")
+        plt.xlabel("Timestep")
+        plt.ylabel("Energy")
+        plt.grid(axis="y", linestyle="")
+        plt.tight_layout()
+        plt.show()
 
 
 class FlexibilityMarketEnv(DoubleAuctionEnv):
