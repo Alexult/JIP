@@ -23,7 +23,7 @@ def generate_agents(n=100, seed=42):
     agents = []
     for i in range(n):
         load = generate_load()
-        generation_capacity = random.randint(0, 100)
+        generation_capacity = random.randint(60, 100)
         generation_type = random.choice(GENERATION_TYPES)
         agents.append({
             "id": i,
@@ -166,7 +166,7 @@ def main():
         agents_JSON = load_agents_from_json(path)
     else:
         # Default behavior: generate 100 with seed 42 (keeps old script's spirit)
-        agents_JSON = generate_agents(n=50, seed=42)
+        agents_JSON = generate_agents(n=10, seed=42)
         save_agents_to_json(agents_JSON, "agents_100.json")
 
     agent_configs = convert_json_agents_configs(agents_JSON)
