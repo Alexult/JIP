@@ -8,6 +8,7 @@ from prosumer import *
 import matplotlib.pyplot as plt
 import math
 from loguru import logger
+import pandas as pd
 
 
 class BaseMarket(ABC):
