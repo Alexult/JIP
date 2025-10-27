@@ -1,112 +1,177 @@
-from energymarket import DoubleAuctionEnv, DoubleAuctionClearingAgent, WholesaleMarketEnv
+import argparse
+import random
+import json
+import os
+import perlin_noise
+import numpy as np
+import matplotlib.pyplot as plt
+
+from energymarket import (
+    DoubleAuctionEnv,
+    DoubleAuctionClearingAgent,
+    FlexibilityMarketEnv,
+)
 from loguru import logger
 
-if __name__ == "__main__":
-    # --- ENVIRONMENT SELECTION ---
-    # Set to True for WholesaleMarketEnv, False for DoubleAuctionEnv
-    USE_WHOLESALE_MARKET = True  
+MAX_STEPS = 24
+GENERATION_TYPES = ["solar", "wind", "none"]
 
-    fixed = lambda job, t: 1 if job[1] == t else 0
 
-    c = 0.4
-    linear = lambda job, t: max(1 - abs(job[1] - t) * c, 0)
+# Function to generate agents
+def generate_agents(n=100, seed=42):
+    random.seed(seed)
+    agents = []
+    for i in range(n):
+        load = generate_load()
+        generation_capacity = random.randint(0, 100)
+        generation_type = random.choice(GENERATION_TYPES)
+        agents.append({
+            "id": i,
+            "load": load,
+            "generation_capacity": generation_capacity,
+            "generation_type": generation_type,
+            "marginal_price": random.randint(550, 600) / 1000,
+        })
+    return agents
 
-    free = lambda job, t: 1
 
-    AGENT_CONFIGS = [
-        {
-            "class": "AggressiveSellerAgent",
-            "load": [(10, 2, free)],
-            "flexible_load": 1,
-            "fixed_load": 2,
-            "generation_capacity": 40,
-            "generation_type": "solar",
-        },
-        {
-            "class": "AggressiveBuyerAgent",
-            "load": [(40, 1, linear), (30, 8, fixed)],
-            "flexible_load": 50,
-            "fixed_load": 10,
-            "generation_capacity": 5,
-        },
-        {
-            "class": "ProsumerAgent",
-            "load": [(40, 17, free), (67, 8, fixed)],
-            "flexible_load": 6,
-            "fixed_load": 5,
-            "generation_capacity": 50,
-            "generation_type": "wind",
-        },
-        {
-            "class": "ProsumerAgent",
-            "load": [(20, 12, linear), (30, 14, fixed)],
-            "flexible_load": 5,
-            "fixed_load": 25,
-            "generation_capacity": 60,
-            "generation_type": "wind",
-        },
-        {
-            "class": "ProsumerAgent",
-            "load": [(34, 4, linear), (24, 16, fixed)],
-            "flexible_load": 5,
-            "fixed_load": 29,
-            "generation_capacity": 11,
-        },
-    ]
-    MAX_STEPS = 23
+def generate_load():
+    noise = perlin_noise.PerlinNoise(octaves=1)
+    scale = random.randrange(10, 50)
+    y = [scale * (noise(i * 0.1) + 1) for i in range(MAX_STEPS)]
+    return y
 
-    # --- CREATE ENVIRONMENT BASED ON SELECTION ---
-    if USE_WHOLESALE_MARKET:
-        env = WholesaleMarketEnv(
-            agent_configs=AGENT_CONFIGS,
-            wholesale_csv_path="./data/representative_wholesale_price_2025.csv",
-            max_timesteps=MAX_STEPS,
-        )
-        env_name = "Wholesale Market"
-    else:
-        env = DoubleAuctionEnv(
-            agent_configs=AGENT_CONFIGS,
-            max_timesteps=MAX_STEPS,
-            market_clearing_agent=DoubleAuctionClearingAgent(),
-        )
-        env_name = "Double Auction"
 
-    logger.info(f"Starting MARL Episode Demo ({MAX_STEPS} steps)")
+# Save agents to JSON
+def save_agents_to_json(agents, filename="agents_100.json"):
+    with open(filename, "w") as f:
+        json.dump(agents, f, indent=2)
+    print(f"Stored {len(agents)} agents in {filename}")
+    return filename
 
-    # Initial observation received upon reset
+
+# Load agents from JSON
+def load_agents_from_json(filename="agents_100.json"):
+    with open(filename, "r") as f:
+        return json.load(f)
+
+
+# Convert JSON agents -> AGENT_CONFIGS
+def convert_json_agents_configs(json_agents):
+    configs = []
+    for j in json_agents:
+        config = {
+            "load": j["load"],
+            "generation_capacity": int(j["generation_capacity"]),
+            "marginal_price": float(j["marginal_price"]),
+        }
+        gt = j.get("generation_type", None)
+        if gt:
+            config["generation_type"] = gt
+        configs.append(config)
+    return configs
+
+
+def run_episode(agent_configs, max_steps=MAX_STEPS):
+    env = FlexibilityMarketEnv(
+        agent_configs=agent_configs,
+        market_clearing_agent=DoubleAuctionClearingAgent(),
+        discount=(1, 1000),
+        max_timesteps=max_steps,
+        buy_tariff=0.1,
+        sell_tariff=0.1
+    )
+
+    logger.info(f"Starting MARL Episode Demo ({max_steps} steps)")
     observations, info = env.reset()
     all_terminated = {i: False for i in env.agent_ids}
     all_truncated = {i: False for i in env.agent_ids}
     total_reward = 0.0
+    t = 1
 
+    time_step = 0
     while not all(all_terminated.values()) and not all(all_truncated.values()):
+
         actions = {}
-        # Iterate over all agents to generate an action by calling the agent's internal method
         for agent_id in env.agent_ids:
-            # Retrieve the agent's current 5-feature observation
             obs_i = observations[agent_id]
+            actions[agent_id] = env.agents[agent_id].devise_strategy(obs_i, env.action_space, time_step)
+        time_step += 1
 
-            # --- CALL AGENT'S DEVISE_STRATEGY METHOD (Uses ProsumerAgent or subclass method) ---
-            actions[agent_id] = env.agents[agent_id].devise_strategy_smarter(
-                obs_i, env.action_space
-            )
-
-        # Step the environment with the state-aware actions
         observations, rewards, all_terminated, all_truncated, info = env.step(actions)
-
         current_step_reward = sum(rewards.values())
         total_reward += current_step_reward
         env.render()
-    print(f"\n--- Simulation Finished ---")
+        t += 1
+
+    print(f"\n--- Episode Finished ---")
     print(f"Total Cumulative Profit (All Agents): {total_reward:.2f}")
 
     env.plot_results()
+    # env.plot_consumption_and_costs()
+    # env.plot_bid_ask_curves(num_plots=5)
+    # env.plot_price_change_for_single_day(day=0)
 
-    # Environment-specific additional plots
-    if USE_WHOLESALE_MARKET:
-        # env.plot_trading_pattern()
-        pass
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run a Double Auction MARL episode with generated or pre-defined agents."
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--generate",
+        type=int,
+        metavar="N",
+        help="Generate N random agents and run the simulation (also saves JSON).",
+    )
+    group.add_argument(
+        "--load-from-file",
+        metavar="PATH",
+        help="Load agents from a JSON file and run the simulation.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed used when generating agents (default: 42).",
+    )
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        default=None,
+        help="Optional output path to save generated agents JSON (default: agents_<N>.json).",
+    )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=MAX_STEPS,
+        help=f"Max timesteps for the environment (default: {MAX_STEPS}).",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    # Decide source of agents
+    if args.generate is not None:
+        n = args.generate
+        agents_JSON = generate_agents(n=n, seed=args.seed)
+        out_path = args.out or f"agents_{n}.json"
+        save_agents_to_json(agents_JSON, out_path)
+    elif args.load_from_file:
+        path = args.load_from_file
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Agents file not found: {path}")
+        agents_JSON = load_agents_from_json(path)
     else:
-        env.plot_bid_ask_curves(num_plots=5)    
+        # Default behavior: generate 100 with seed 42 (keeps old script's spirit)
+        agents_JSON = generate_agents(n=50, seed=42)
+        save_agents_to_json(agents_JSON, "agents_100.json")
 
-    env.plot_price_change_for_single_day(day=0)
+    agent_configs = convert_json_agents_configs(agents_JSON)
+    run_episode(agent_configs, max_steps=args.steps)
+
+
+if __name__ == "__main__":
+    main()
