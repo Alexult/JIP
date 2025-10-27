@@ -15,11 +15,12 @@ from energymarket import (
 from loguru import logger
 
 # Use a consistent number of steps for comparison
-MAX_STEPS = 96
+MAX_STEPS = 24
 GENERATION_TYPES = ["solar", "wind", "none"]
 
 
 # --- Agent Generation Functions (for consistency) ---
+
 
 def generate_agents(n=100, seed=42):
     random.seed(seed)
@@ -29,14 +30,16 @@ def generate_agents(n=100, seed=42):
         load = generate_load()
         generation_capacity = random.randint(60, 100)
         generation_type = random.choice(GENERATION_TYPES)
-        agents.append({
-            "id": i,
-            "load": load,
-            "generation_capacity": generation_capacity,
-            "generation_type": generation_type,
-            # This marginal_price is used by ProsumerAgent for selling
-            "marginal_price": random.randint(800, 1200) / 10000,
-        })
+        agents.append(
+            {
+                "id": i,
+                "load": load,
+                "generation_capacity": generation_capacity,
+                "generation_type": generation_type,
+                # This marginal_price is used by ProsumerAgent for selling
+                "marginal_price": random.randint(800, 1200) / 10000,
+            }
+        )
     return agents
 
 
@@ -45,8 +48,11 @@ def generate_load():
     # Generate load for more than just 24 steps
     scale = random.uniform(20, 80)
     # Generate for *2 to ensure ProsumerAgent strategy doesn't go out of bounds
-    y = [scale * (noise(i * 0.05) * 0.5 + 0.6) + random.uniform(-5, 5) for i in range(MAX_STEPS * 2)]
-    return [max(0, val) for val in y] # Ensure no negative load
+    y = [
+        scale * (noise(i * 0.05) * 0.5 + 0.6) + random.uniform(-5, 5)
+        for i in range(MAX_STEPS)
+    ]
+    return [max(0, val) for val in y]  # Ensure no negative load
 
 
 def save_agents_to_json(agents, filename="agents_100.json"):
@@ -83,6 +89,7 @@ def convert_json_agents_configs(json_agents):
 
 # --- Episode Runners ---
 
+
 def run_episode_wholesale(agent_configs, max_steps=MAX_STEPS):
     """
     Runs the WholesaleMarketEnv and returns its history for plotting.
@@ -100,11 +107,11 @@ def run_episode_wholesale(agent_configs, max_steps=MAX_STEPS):
     observations, info = env.reset()
     all_terminated = {i: False for i in env.agent_ids}
     all_truncated = {i: False for i in env.agent_ids}
-    total_agent_rewards = {i: 0.0 for i in env.agent_ids} # Cumulative rewards
-    
+    total_agent_rewards = {i: 0.0 for i in env.agent_ids}  # Cumulative rewards
+
     t = 0
     while not all(all_terminated.values()) and not all(all_truncated.values()):
-        time_step = t 
+        time_step = t
         actions = {}
         for agent_id in env.agent_ids:
             if agent_id in observations:
@@ -112,29 +119,32 @@ def run_episode_wholesale(agent_configs, max_steps=MAX_STEPS):
                 actions[agent_id] = env.agents[agent_id].devise_strategy(
                     obs_i, env.action_space, time_step
                 )
-            
+
         observations, rewards, all_terminated, all_truncated, info = env.step(actions)
-        
+
         for agent_id, reward in rewards.items():
             total_agent_rewards[agent_id] += reward
-            
+
         if t % 24 == 0:
             env.render()
         t += 1
-        
+
         if all(all_terminated.values()) or all(all_truncated.values()):
             break
 
     total_system_profit = sum(total_agent_rewards.values())
-    logger.success(f"Wholesale Episode Finished. Total System Profit/Loss: €{total_system_profit:.2f}")
-    
+    logger.success(
+        f"Wholesale Episode Finished. Total System Profit/Loss: €{total_system_profit:.2f}"
+    )
+
     # Return the collected history
+    initial_net_demand, actual_net_demand, _ = env.plot_consumption_and_costs(True)
     return {
         "prices": env.wholesale_prices_history,
         "cumulative_cost": env.cumulative_price_paid_history,
-        "initial_net_demand": [sum(nd_list) for nd_list in env.initial_net_demand_history],
-        "actual_net_demand": [sum(nd_list) for nd_list in env.net_demand_history],
-        "total_profit": total_system_profit
+        "initial_net_demand": initial_net_demand,
+        "actual_net_demand": actual_net_demand,
+        "total_profit": total_system_profit,
     }
 
 
@@ -148,18 +158,18 @@ def run_episode_flexibility(agent_configs, max_steps=MAX_STEPS):
     env = FlexibilityMarketEnv(
         agent_configs=configs_copy,
         market_clearing_agent=DoubleAuctionClearingAgent(),
-        discount=(1, 1000), # Using default discount from main.py
+        discount=(1, 1000),  # Using default discount from main.py
         max_timesteps=max_steps,
         buy_tariff=0.1,
-        sell_tariff=0.1
+        sell_tariff=0.1,
     )
 
     logger.info(f"Starting Flexibility Market Episode ({max_steps} steps)")
     observations, info = env.reset()
     all_terminated = {i: False for i in env.agent_ids}
     all_truncated = {i: False for i in env.agent_ids}
-    total_agent_rewards = {i: 0.0 for i in env.agent_ids} # Cumulative rewards
-    
+    total_agent_rewards = {i: 0.0 for i in env.agent_ids}  # Cumulative rewards
+
     t = 0
     while not all(all_terminated.values()) and not all(all_truncated.values()):
         time_step = t
@@ -172,45 +182,50 @@ def run_episode_flexibility(agent_configs, max_steps=MAX_STEPS):
                 )
 
         observations, rewards, all_terminated, all_truncated, info = env.step(actions)
-        
+
         for agent_id, reward in rewards.items():
             total_agent_rewards[agent_id] += reward
 
         if t % 24 == 0:
             env.render()
         t += 1
-        
+
         if all(all_terminated.values()) or all(all_truncated.values()):
             break
 
     total_system_profit = sum(total_agent_rewards.values())
-    logger.success(f"Flexibility Episode Finished. Total System Profit/Loss: €{total_system_profit:.2f}")
+    logger.success(
+        f"Flexibility Episode Finished. Total System Profit/Loss: €{total_system_profit:.2f}"
+    )
 
     # Manually calculate demand profiles
-    T = env.current_timestep
-    initial_net_demand_total = np.zeros(T)
-    actual_net_demand_total = np.zeros(T)
-    
-    for agent in env.agents:
-        init, actual, _ = agent.get_demand_consumption()
-        # Truncate to the number of steps actually run
-        init = init[:T]
-        actual = actual[:T]
-        # Add to totals
-        initial_net_demand_total[:len(init)] += init
-        actual_net_demand_total[:len(actual)] += actual
-    
+    # T = env.current_timestep
+    # initial_net_demand_total = np.zeros(T)
+    # actual_net_demand_total = np.zeros(T)
+    #
+    # for agent in env.agents:
+    #     init, actual, _ = agent.get_demand_consumption()
+    #     # Truncate to the number of steps actually run
+    #     init = init[:T]
+    #     actual = actual[:T]
+    #     # Add to totals
+    #     initial_net_demand_total[: len(init)] += init
+    #     actual_net_demand_total[: len(actual)] += actual
+
     # Return the collected history
+
+    initial_net_demand, actual_net_demand, _ = env.plot_consumption_and_costs(True)
     return {
         "prices": env.clearing_prices,
         "cumulative_cost": env.cumulative_price_paid_history,
-        "initial_net_demand": list(initial_net_demand_total),
-        "actual_net_demand": list(actual_net_demand_total),
-        "total_profit": total_system_profit
+        "initial_net_demand": initial_net_demand,
+        "actual_net_demand": actual_net_demand,
+        "total_profit": total_system_profit,
     }
 
 
 # --- NEW Merged Plotting Function (with scaling) ---
+
 
 def plot_comparison_results(wh_results: dict, fl_results: dict):
     """
@@ -218,40 +233,56 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     Applies a factor of 10x to Flexibility Market results for unit consistency.
     """
     logger.info("Generating comparison plots...")
-    
+
     # Define the scaling factor for flexibility market results
     FLEXIBILITY_SCALE_FACTOR = 1000
-    
+
     # Ensure data lengths match for plotting
     steps_ran = min(len(wh_results["prices"]), len(fl_results["prices"]))
     if steps_ran == 0:
         logger.error("No data to plot. Both simulations might have failed.")
         return
-        
+
     timesteps = range(1, steps_ran + 1)
-    
+
     # --- Data Preparation with Scaling ---
-    
+
     # Prices
     wh_prices = np.array(wh_results["prices"][:steps_ran])
     # Apply 10x scale
-    fl_prices = np.array(fl_results["prices"][:steps_ran]) * FLEXIBILITY_SCALE_FACTOR 
+    fl_prices = np.array(fl_results["prices"][:steps_ran]) * FLEXIBILITY_SCALE_FACTOR
     logger.debug(f"fl prices: {fl_prices}")
-    
+
     # Cumulative Cost
     wh_cum_cost = np.array(wh_results["cumulative_cost"][:steps_ran])
     # Apply 10x scale
-    fl_cum_cost = np.array(fl_results["cumulative_cost"][:steps_ran]) * FLEXIBILITY_SCALE_FACTOR
-    
+    fl_cum_cost = (
+        np.array(fl_results["cumulative_cost"][:steps_ran]) * FLEXIBILITY_SCALE_FACTOR
+    )
+
     # Demand Profiles (no scaling needed here as it's a quantity/MWh, not a price/cost)
     wh_actual_nd = np.array(wh_results["actual_net_demand"][:steps_ran])
     fl_actual_nd = np.array(fl_results["actual_net_demand"][:steps_ran])
-    initial_net_demand = np.array(wh_results["initial_net_demand"][:steps_ran]) 
-    
+    initial_net_demand = np.array(wh_results["initial_net_demand"][:steps_ran])
+
     # --- Plot 1: Price Comparison ---
     plt.figure(figsize=(12, 6))
-    plt.plot(timesteps, wh_prices, label="Wholesale Price", color="orange", linestyle="--", alpha=0.9)
-    plt.plot(timesteps, fl_prices, label="Flexibility Market Price (Scaled 10x)", color="blue", linestyle="-", alpha=0.9)
+    plt.plot(
+        timesteps,
+        wh_prices,
+        label="Wholesale Price",
+        color="orange",
+        linestyle="--",
+        alpha=0.9,
+    )
+    plt.plot(
+        timesteps,
+        fl_prices,
+        label="Flexibility Market Price (Scaled 10x)",
+        color="blue",
+        linestyle="-",
+        alpha=0.9,
+    )
     plt.title("Market Price Comparison")
     plt.xlabel("Timestep (Hour)")
     plt.ylabel("Price (€/MWh)")
@@ -262,8 +293,22 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
 
     # --- Plot 2: Cumulative Cost Comparison (Buyers) ---
     plt.figure(figsize=(12, 6))
-    plt.plot(timesteps, wh_cum_cost, label="Wholesale Market (Total Buyer Cost)", color="orange", linestyle="--", linewidth=2)
-    plt.plot(timesteps, fl_cum_cost, label="Flexibility Market (Total Buyer Cost, Scaled 10x)", color="blue", linestyle="-", linewidth=2)
+    plt.plot(
+        timesteps,
+        wh_cum_cost,
+        label="Wholesale Market (Total Buyer Cost)",
+        color="orange",
+        linestyle="--",
+        linewidth=2,
+    )
+    plt.plot(
+        timesteps,
+        fl_cum_cost,
+        label="Flexibility Market (Total Buyer Cost, Scaled 10x)",
+        color="blue",
+        linestyle="-",
+        linewidth=2,
+    )
     plt.title("Cumulative System Cost Comparison (Buyers Only)")
     plt.xlabel("Timestep (Hour)")
     plt.ylabel("Cumulative Cost (€)")
@@ -271,12 +316,33 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     plt.grid(True, linestyle=":", alpha=0.6)
     plt.savefig("cumulative_cost_comparison.png")
     plt.close()
-    
+
     # --- Plot 3: Net Demand Profile Comparison ---
     plt.figure(figsize=(12, 6))
-    plt.plot(timesteps, initial_net_demand, label="Initial Net Demand (Baseline)", color="gray", linestyle=":", linewidth=2)
-    plt.plot(timesteps, wh_actual_nd, label="Optimized Net Demand (Wholesale)", color="orange", linestyle="--", alpha=0.9)
-    plt.plot(timesteps, fl_actual_nd, label="Optimized Net Demand (Flexibility Market)", color="blue", linestyle="-", alpha=0.9)
+    plt.plot(
+        timesteps,
+        initial_net_demand,
+        label="Initial Net Demand (Baseline)",
+        color="gray",
+        linestyle=":",
+        linewidth=2,
+    )
+    plt.plot(
+        timesteps,
+        wh_actual_nd,
+        label="Optimized Net Demand (Wholesale)",
+        color="orange",
+        linestyle="--",
+        alpha=0.9,
+    )
+    plt.plot(
+        timesteps,
+        fl_actual_nd,
+        label="Optimized Net Demand (Flexibility Market)",
+        color="blue",
+        linestyle="-",
+        alpha=0.9,
+    )
     plt.title("Net Demand Optimization Comparison")
     plt.xlabel("Timestep (Hour)")
     plt.ylabel("Total Net Demand (MWh)")
@@ -284,28 +350,31 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     plt.grid(True, linestyle=":", alpha=0.6)
     plt.savefig("net_demand_comparison.png")
     plt.close()
-    
+
     # --- Print Final Summary (with scaling) ---
-    fl_total_profit_scaled = fl_results['total_profit'] * FLEXIBILITY_SCALE_FACTOR
-    
-    print("\n" + "="*30)
+    fl_total_profit_scaled = fl_results["total_profit"] * FLEXIBILITY_SCALE_FACTOR
+
+    print("\n" + "=" * 30)
     print("--- 📊 Simulation Comparison Summary ---")
     print(f"Total Steps: {steps_ran}")
     # Note: agents_JSON is not available globally here, but we can assume n=50 for default case
-    print("-"*30)
+    print("-" * 30)
     print("Wholesale Market:")
     print(f"  Total System Profit/Loss: €{wh_results['total_profit']:.2f}")
     print(f"  Total Buyer Cost:       €{wh_cum_cost[-1]:.2f}")
     print(f"  Average Price:          €{np.mean(wh_prices):.2f}/MWh")
-    print("-"*30)
-    print(f"Flexibility Market (All Financials Scaled by {FLEXIBILITY_SCALE_FACTOR:.1f}x):")
+    print("-" * 30)
+    print(
+        f"Flexibility Market (All Financials Scaled by {FLEXIBILITY_SCALE_FACTOR:.1f}x):"
+    )
     print(f"  Total System Profit/Loss: €{fl_total_profit_scaled:.2f}")
     print(f"  Total Buyer Cost:       €{fl_cum_cost[-1]:.2f}")
     print(f"  Average Price:          €{np.mean(fl_prices):.2f}/MWh")
-    print("="*30)
+    print("=" * 30)
 
 
 # --- Argument Parsing (from main_wholesale.py) ---
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -346,6 +415,7 @@ def parse_args():
 
 # --- Main Orchestration Function ---
 
+
 def main():
     args = parse_args()
 
@@ -367,17 +437,15 @@ def main():
         save_agents_to_json(agents_JSON, "agents_50.json")
 
     # --- 2. Run Simulations ---
-    
+
     # Run Wholesale
     wholesale_results = run_episode_wholesale(
-        agent_configs=agents_JSON, 
-        max_steps=args.steps
+        agent_configs=agents_JSON, max_steps=args.steps
     )
-    
+
     # Run Flexibility
     flexibility_results = run_episode_flexibility(
-        agent_configs=agents_JSON, 
-        max_steps=args.steps
+        agent_configs=agents_JSON, max_steps=args.steps
     )
 
     # --- 3. Plot Comparison ---

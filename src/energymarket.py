@@ -29,7 +29,7 @@ class MarketClearingAgent(ABC):
 
     @abstractmethod
     def clear_market(
-            self, bids_array: np.ndarray, offers_array: np.ndarray, debug=False
+        self, bids_array: np.ndarray, offers_array: np.ndarray, debug=False
     ) -> MarketResult:
         pass
 
@@ -44,7 +44,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
 
     @override
     def clear_market(
-            self, bids_array: np.ndarray, offers_array: np.ndarray, debug=False
+        self, bids_array: np.ndarray, offers_array: np.ndarray, debug=False
     ) -> MarketResult:
         """
         Determines the market clearing price and quantity by finding the intersection
@@ -55,10 +55,10 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
             return 0.0, 0.0, []
 
         if (
-                bids_array.ndim != 2
-                or bids_array.shape[1] != 3
-                or offers_array.ndim != 2
-                or offers_array.shape[1] != 3
+            bids_array.ndim != 2
+            or bids_array.shape[1] != 3
+            or offers_array.ndim != 2
+            or offers_array.shape[1] != 3
         ):
             raise ValueError(
                 f"Input arrays must be of shape (N, 3). "
@@ -168,12 +168,12 @@ class DoubleAuctionEnv(Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
     def __init__(
-            self,
-            agent_configs: list[dict[str, Any]],
-            market_clearing_agent: MarketClearingAgent,
-            max_timesteps: int = 100,
-            buy_tariff: float = 0.1,
-            sell_tariff: int = 0.1
+        self,
+        agent_configs: list[dict[str, Any]],
+        market_clearing_agent: MarketClearingAgent,
+        max_timesteps: int = 100,
+        buy_tariff: float = 0.1,
+        sell_tariff: int = 0.1,
     ):
         super().__init__()
 
@@ -206,7 +206,7 @@ class DoubleAuctionEnv(Env):
                     marginal_price=config["marginal_price"],
                     generation_type=config["generation_type"]
                     if "generation_type" in config
-                       and config["generation_type"] is not None
+                    and config["generation_type"] is not None
                     else "solar",
                 )
             )
@@ -336,7 +336,7 @@ class DoubleAuctionEnv(Env):
         return observations
 
     def _calculate_rewards(
-            self, clearing_price: float, cleared_participants: list[tuple[int, float]]
+        self, clearing_price: float, cleared_participants: list[tuple[int, float]]
     ) -> dict[int, float]:
         """Calculates the reward (profit) for all agents for the current timestep."""
         rewards: dict[int, float] = {agent_id: 0.0 for agent_id in self.agent_ids}
@@ -356,7 +356,7 @@ class DoubleAuctionEnv(Env):
 
     @override
     def reset(
-            self, seed: int | None = None, options: dict[str, Any] | None = None
+        self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[int, dict[str, np.ndarray]], dict[str, Any]]:
         """Resets the environment."""
         super().reset(seed=seed)
@@ -393,7 +393,7 @@ class DoubleAuctionEnv(Env):
         return observation, info
 
     def step(
-            self, actions: dict[int, np.ndarray]
+        self, actions: dict[int, np.ndarray]
     ) -> tuple[
         dict[int, dict[str, np.ndarray]],
         dict[int, float],
@@ -428,7 +428,9 @@ class DoubleAuctionEnv(Env):
         total_offers_qty = sum(o[2] for o in all_offers)
 
         bids_array = np.array(all_bids, dtype=float) if all_bids else np.empty((0, 3))
-        offers_array = np.array(all_offers, dtype=float) if all_offers else np.empty((0, 3))
+        offers_array = (
+            np.array(all_offers, dtype=float) if all_offers else np.empty((0, 3))
+        )
         self.market_orders_history.append((bids_array.copy(), offers_array.copy()))
 
         clearing_price, clearing_quantity, cleared_participants = (
@@ -459,10 +461,10 @@ class DoubleAuctionEnv(Env):
         self.actual_consumption_history.append(actual_consumption)
         self.total_price_paid_history.append(total_price_paid)
         cumulative = (
-                         self.cumulative_price_paid_history[-1]
-                         if self.cumulative_price_paid_history
-                         else 0.0
-                     ) + total_price_paid
+            self.cumulative_price_paid_history[-1]
+            if self.cumulative_price_paid_history
+            else 0.0
+        ) + total_price_paid
         self.cumulative_price_paid_history.append(cumulative)
         ############
 
@@ -476,9 +478,11 @@ class DoubleAuctionEnv(Env):
             if agent_id in bids_agent_ids:
                 action = [x[1:] for x in bids_array if x[0] == agent_id][0]
             else:
-                action = [[x[1] ,-x[2]] for x in offers_array if x[0] == agent_id][0]
+                action = [[x[1], -x[2]] for x in offers_array if x[0] == agent_id][0]
             self.last_cleared_quantities[agent_id] = qty
-            self.agents[agent_id].purchase_from_national_market(qty, action[0], action[1], self.current_timestep)
+            self.agents[agent_id].purchase_from_national_market(
+                qty, action[0], action[1], self.current_timestep
+            )
 
         self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
@@ -752,7 +756,7 @@ class DoubleAuctionEnv(Env):
     #     plt.tight_layout()
     #     plt.show()
     #
-    def plot_consumption_and_costs(self):
+    def plot_consumption_and_costs(self,return_only_data=False):
         """
         Plots:
         1) total preferred consumption vs total actual consumption over time
@@ -763,17 +767,25 @@ class DoubleAuctionEnv(Env):
         if T == 0:
             print("No history to plot (run an episode first).")
             return
-        timesteps = list(range(1, T+1))
+        timesteps = list(range(1, T + 1))
 
         initial_net_demand = np.zeros(T)
         actual_net_demand = np.zeros(T)
         total_generation = np.zeros(T)
         for agent in self.agents:
             init, actual, supply = agent.get_demand_consumption()
-            initial_net_demand = [initial_net_demand[i] + val for i, val in enumerate(init)]
-            actual_net_demand = [actual_net_demand[i] + val for i, val in enumerate(actual)]
-            total_generation = [total_generation[i] + val for i, val in enumerate(supply)]
+            initial_net_demand = [
+                initial_net_demand[i] + val for i, val in enumerate(init)
+            ]
+            actual_net_demand = [
+                actual_net_demand[i] + val for i, val in enumerate(actual)
+            ]
+            total_generation = [
+                total_generation[i] + val for i, val in enumerate(supply)
+            ]
 
+        if return_only_data:
+            return initial_net_demand, actual_net_demand, total_generation
 
         # print(f"required energy {sum(initial_net_demand)}")
         # print(f"actual demand {sum(actual_net_demand)}")
@@ -810,8 +822,6 @@ class DoubleAuctionEnv(Env):
         plt.tight_layout()
         plt.show()
 
-
-
         # # Plot 2: total price paid per timestep
         plt.figure(figsize=(10, 4))
         plt.bar(timesteps, price_paid)
@@ -845,13 +855,13 @@ class DoubleAuctionEnv(Env):
 class FlexibilityMarketEnv(DoubleAuctionEnv):
     @override
     def __init__(
-            self,
-            agent_configs: list[dict[str, Any]],
-            market_clearing_agent: MarketClearingAgent,
-            discount: tuple[float, float],
-            max_timesteps: int = 100,
-            buy_tariff: float = 0.1,
-            sell_tariff: float = 0.1
+        self,
+        agent_configs: list[dict[str, Any]],
+        market_clearing_agent: MarketClearingAgent,
+        discount: tuple[float, float],
+        max_timesteps: int = 100,
+        buy_tariff: float = 0.1,
+        sell_tariff: float = 0.1,
     ):
         super().__init__(
             agent_configs, market_clearing_agent, max_timesteps, buy_tariff, sell_tariff
@@ -899,9 +909,7 @@ class FlexibilityMarketEnv(DoubleAuctionEnv):
         return forecasted_prices
 
     @override
-    def _get_obs(
-            self, price_forecast: list[float]
-    ) -> dict[int, dict[str, np.ndarray]]:
+    def _get_obs(self, price_forecast: list[float]) -> dict[int, dict[str, np.ndarray]]:
         """Compiles dictionary observations for each agent."""
         market_stats_arr = np.array(
             [

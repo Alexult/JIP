@@ -208,7 +208,7 @@ class ProsumerAgent:
 
         new_schedule = np.concatenate((new_schedule[:timestep], sol.get("x"), new_schedule[timestep + size:]))
 
-        a = 0.005
+        a = 0.05
         # y = [self.schedule[i] - sol.get("x")[i] for i in range(FORECAST_HORIZON)]
         new_schedule[timestep:] = a * np.array(new_schedule)[timestep:] + (1 - a) * np.array(self.schedule)[timestep:]
         z = [val - new_schedule[i] for i, val in enumerate(self.schedule)]

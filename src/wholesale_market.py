@@ -485,7 +485,7 @@ class WholesaleMarketEnv(Env):
         if self.n_agents <= 20:  # Only show legend if not too crowded
             plt.legend()
         plt.tight_layout()
-        
+
         plt.show()
 
     def plot_price_change_for_single_day(self, day: int = 0):
@@ -516,7 +516,7 @@ class WholesaleMarketEnv(Env):
         plt.tight_layout()
         plt.show()
 
-    def plot_consumption_and_costs(self):
+    def plot_consumption_and_costs(self, return_only_data=False):
         """
         Plots:
         1) total preferred (initial) consumption vs total actual (optimized) consumption over time
@@ -530,12 +530,23 @@ class WholesaleMarketEnv(Env):
             return
         timesteps = list(range(1, T + 1))
 
-        # Sum the per-agent lists into a single total value for each timestep
-        initial_net_demand = np.array([sum(nd_list) for nd_list in self.initial_net_demand_history])
-        actual_net_demand = np.array([sum(nd_list) for nd_list in self.net_demand_history])
-        total_generation = np.array(self.total_generation_history)
-        price_paid = np.array(self.total_price_paid_history)
-        cumulative_paid = np.array(self.cumulative_price_paid_history)
+        initial_net_demand = np.zeros(T)
+        actual_net_demand = np.zeros(T)
+        total_generation = np.zeros(T)
+        for agent in self.agents:
+            init, actual, supply = agent.get_demand_consumption()
+            logger.debug(f"init size: {len(init)}")
+            initial_net_demand = [
+                initial_net_demand[i] + val for i, val in enumerate(init)
+            ]
+            actual_net_demand = [
+                actual_net_demand[i] + val for i, val in enumerate(actual)
+            ]
+            total_generation = [
+                total_generation[i] + val for i, val in enumerate(supply)
+            ]
+        if return_only_data:
+            return initial_net_demand, actual_net_demand, total_generation
 
         # Plot 1: preferred vs actual consumption
         plt.figure(figsize=(10, 5))
@@ -563,7 +574,7 @@ class WholesaleMarketEnv(Env):
 
         # Plot 2: total price paid per timestep
         plt.figure(figsize=(10, 4))
-        plt.bar(timesteps, price_paid, color='red')
+        plt.bar(timesteps, price_paid, color="red")
         plt.title("Total Price Paid by Buyers per Timestep")
         plt.xlabel("Timestep")
         plt.ylabel("Price Paid (monetary units)")
@@ -573,7 +584,7 @@ class WholesaleMarketEnv(Env):
 
         # Plot 3: cumulative price paid over time
         plt.figure(figsize=(10, 4))
-        plt.plot(timesteps, cumulative_paid, marker="o", linestyle="-", color='red')
+        plt.plot(timesteps, cumulative_paid, marker="o", linestyle="-", color="red")
         plt.title("Cumulative Total Price Paid Over Time")
         plt.xlabel("Timestep")
         plt.ylabel("Cumulative Price Paid (monetary units)")
@@ -583,7 +594,7 @@ class WholesaleMarketEnv(Env):
 
         # Plot 4: total generation
         plt.figure(figsize=(10, 4))
-        plt.plot(timesteps, total_generation, marker="o", linestyle="-", color='green')
+        plt.plot(timesteps, total_generation, marker="o", linestyle="-", color="green")
         plt.title("Total Energy Generation Over Time")
         plt.xlabel("Timestep")
         plt.ylabel("Energy (MWh)")
