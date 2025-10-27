@@ -183,7 +183,7 @@ class DoubleAuctionEnv(Env):
         self.agent_ids = list(range(self.n_agents))
         self.max_timesteps = max_timesteps
         self.current_timestep = 0
-        self.FORECAST_HORIZON = 24
+        self.FORECAST_HORIZON = 10
         self.buy_tariff = buy_tariff
         self.sell_tariff = sell_tariff
 

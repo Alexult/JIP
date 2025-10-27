@@ -7,7 +7,7 @@ import pandas as pd
 from loguru import logger
 import os
 
-FORECAST_HORIZON = 24
+FORECAST_HORIZON = 10
 
 PRICE_CSV_PATH = os.path.join(
     os.path.dirname(__file__),
@@ -227,7 +227,7 @@ class ProsumerAgent:
 
             if nd > 0:  # needs to buy
                 base_price = buy_prices[h]
-                price = base_price * price_noise * (1 + 0.1 * (1.01) ** (-nd))
+                price = base_price * price_noise * ((1.01) ** (nd))
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(nd, action_space.low[h, 1], action_space.high[h, 1])
                 bids[h] = [price, qty]

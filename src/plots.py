@@ -35,7 +35,7 @@ def generate_agents(n=100, seed=42):
             "generation_capacity": generation_capacity,
             "generation_type": generation_type,
             # This marginal_price is used by ProsumerAgent for selling
-            "marginal_price": random.randint(1000, 1500) / 10000,
+            "marginal_price": random.randint(800, 1200) / 10000,
         })
     return agents
 
@@ -220,7 +220,7 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     logger.info("Generating comparison plots...")
     
     # Define the scaling factor for flexibility market results
-    FLEXIBILITY_SCALE_FACTOR = 10.0
+    FLEXIBILITY_SCALE_FACTOR = 1000
     
     # Ensure data lengths match for plotting
     steps_ran = min(len(wh_results["prices"]), len(fl_results["prices"]))
