@@ -25,13 +25,15 @@ def generate_agents(n=100, seed=42):
         load = generate_load()
         generation_capacity = random.randint(60, 100)
         generation_type = random.choice(GENERATION_TYPES)
-        agents.append({
-            "id": i,
-            "load": load,
-            "generation_capacity": generation_capacity,
-            "generation_type": generation_type,
-            "marginal_price": random.randint(1000, 1500) / 10000,
-        })
+        agents.append(
+            {
+                "id": i,
+                "load": load,
+                "generation_capacity": generation_capacity,
+                "generation_type": generation_type,
+                "marginal_price": random.randint(1000, 1500) / 10000,
+            }
+        )
     return agents
 
 
@@ -79,7 +81,7 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
         discount=(1, 1000),
         max_timesteps=max_steps,
         buy_tariff=0.1,
-        sell_tariff=0.1
+        sell_tariff=0.1,
     )
 
     logger.info(f"Starting MARL Episode Demo ({max_steps} steps)")
@@ -91,11 +93,12 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
 
     time_step = 0
     while not all(all_terminated.values()) and not all(all_truncated.values()):
-
         actions = {}
         for agent_id in env.agent_ids:
             obs_i = observations[agent_id]
-            actions[agent_id] = env.agents[agent_id].devise_strategy(obs_i, env.action_space, time_step)
+            actions[agent_id] = env.agents[agent_id].devise_strategy(
+                obs_i, env.action_space, time_step
+            )
         time_step += 1
 
         observations, rewards, all_terminated, all_truncated, info = env.step(actions)

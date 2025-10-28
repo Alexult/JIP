@@ -756,7 +756,7 @@ class DoubleAuctionEnv(Env):
     #     plt.tight_layout()
     #     plt.show()
     #
-    def plot_consumption_and_costs(self,return_only_data=False):
+    def plot_consumption_and_costs(self, return_only_data=False):
         """
         Plots:
         1) total preferred consumption vs total actual consumption over time

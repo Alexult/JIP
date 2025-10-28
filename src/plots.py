@@ -251,7 +251,6 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     wh_prices = np.array(wh_results["prices"][:steps_ran])
     # Apply 10x scale
     fl_prices = np.array(fl_results["prices"][:steps_ran]) * FLEXIBILITY_SCALE_FACTOR
-    logger.debug(f"fl prices: {fl_prices}")
 
     # Cumulative Cost
     wh_cum_cost = np.array(wh_results["cumulative_cost"][:steps_ran])

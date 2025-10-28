@@ -51,24 +51,26 @@ class ProsumerAgent:
     """
 
     def __init__(
-            self,
-            agent_id: int,
-            load: list[float],
-            generation_capacity: float,
-            marginal_price: float,
-            generation_type: str = "solar",
+        self,
+        agent_id: int,
+        load: list[float],
+        generation_capacity: float,
+        marginal_price: float,
+        generation_type: str = "solar",
     ):
         self.agent_id = agent_id
         self.load = load  # energy demand must be met entirely or not. can move according to the lambda in the job
         self.generation_capacity = generation_capacity
         self.generation_type = generation_type
         self.last_bid_offer: tuple[float, float] | None = None  # (price, quantity)
-        self.costs = [0] * len(self.load)
-        self.schedule = [l for l in load]  # current schedule to buy energy. Change this to change behaviour
+        self.costs = [0.0] * len(self.load)
+        self.schedule = [
+            l for l in load
+        ]  # current schedule to buy energy. Change this to change behaviour
         self.marginal_price = marginal_price
         self.net_demand = [0] * FORECAST_HORIZON
         self.total_energy = sum(self.schedule[0:FORECAST_HORIZON])
-        self.national_consumption = [0] * len(self.load)
+        self.national_consumption = [0.0] * len(self.load)
 
         generation_data_file = "./data/hourly_wind_solar_data.csv"
         df = pd.read_csv(generation_data_file)
@@ -85,14 +87,14 @@ class ProsumerAgent:
 
     def _calc_solar_generation(self, hour_of_day: int):
         effective_generation = (
-                self.solar_data[hour_of_day] * self.multiplicative_factor[0]
+            self.solar_data[hour_of_day] * self.multiplicative_factor[0]
         )
 
         return effective_generation
 
     def _calc_wind_generation(self, hour_of_day: int) -> float:
         effective_generation = (
-                self.wind_data[hour_of_day] * self.multiplicative_factor[1]
+            self.wind_data[hour_of_day] * self.multiplicative_factor[1]
         )
         return effective_generation
 
@@ -100,8 +102,10 @@ class ProsumerAgent:
         """
         Calculates and updates the net_demand at the timestep
         """
-        self.net_demand = [self._calculate_demand(t + time_step) for t in
-                           range(len(self.load[time_step:time_step + FORECAST_HORIZON]))]
+        self.net_demand = [
+            self._calculate_demand(t + time_step)
+            for t in range(len(self.load[time_step : time_step + FORECAST_HORIZON]))
+        ]
 
     def _calculate_demand(self, timestep: int) -> float:
         """
@@ -116,38 +120,30 @@ class ProsumerAgent:
             effective_generation = self._calc_wind_generation(hour_of_day)
         return self.schedule[timestep] - effective_generation
 
-    def get_demand_consumption(self) -> tuple[list[float], list[float], list[float]]:
+    def get_demand_consumption(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         time_steps = len(self.load)
 
-        supply = np.zeros(time_steps)
         if self.generation_type == "solar":
-            supply = np.concatenate((np.repeat(self.solar_data, time_steps // 24),
-                                     self.solar_data[:time_steps % 24])) * self.multiplicative_factor[0]
+            pattern = self.solar_data
+            factor = self.multiplicative_factor[0]
         elif self.generation_type == "wind":
-            supply = np.concatenate((np.repeat(self.wind_data, time_steps // 24),
-                                     self.wind_data[:time_steps % 24])) * self.multiplicative_factor[1]
+            pattern = self.wind_data
+            factor = self.multiplicative_factor[1]
+        else:
+            pattern = np.zeros(24)
+            factor = 1.0
+
+        # Tile the pattern to fill time_steps, then truncate
+        supply = np.tile(pattern, time_steps // len(pattern) + 1)[:time_steps] * factor
+
         initial_net_demand = np.array(self.load) - supply
         actual_net_demand = np.array(self.schedule) - supply
+
         return initial_net_demand, actual_net_demand, supply
 
-    # def handle_after_auction(
-    #     #         self, qty_got: float, timestep, buy_tariff: int, sell_tariff: int
-    #     # ) -> float:
-    #     #     # NOTE: THE DATAFRAME HAS ONLY data for 24 hours, get more data
-    #     #     t = (timestep) % 24
-    #     #     day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
-    #     #     price = day.iloc[t + 1, 1]
-    #     #     logger.debug(f"timestep:{timestep}, net_demand: {len(self.net_demand)}")
-    #     #     qty_remaining = 0
-    #     #     if self.net_demand[0] < 0:
-    #     #         qty_remaining = (-self.net_demand[0]) - qty_got
-    #     #         price += sell_tariff
-    #     #     else:
-    #     #         qty_remaining = self.net_demand[0] - qty_got
-    #     #         price += buy_tariff
-    #     #     return price * qty_remaining
-
-    def purchase_from_national_market(self, qty_got: float, bid_price: float, bid_qty: float, timestep: int):
+    def purchase_from_national_market(
+        self, qty_got: float, bid_price: float, bid_qty: float, timestep: int
+    ):
         t = timestep % 24
         day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
         price = day.iloc[t, 1]
@@ -159,12 +155,14 @@ class ProsumerAgent:
             if bid_price <= price:
                 qty = bid_qty - qty_got
 
-        cost = price * qty
+        cost: float = price * qty
         self.national_consumption[timestep] = qty
         self.costs[timestep] += -cost
         return cost
 
-    def devise_strategy(self, obs: dict[str, np.ndarray], action_space: Box, timestep: int) -> np.ndarray:
+    def devise_strategy(
+        self, obs: dict[str, np.ndarray], action_space: Box, timestep: int
+    ) -> np.ndarray:
         """
         Strategy: price-responsive flexible prosumer.
         Shifts flexible load to cheaper forecast hours and sets bid/offer prices relative to last known clearing price.
@@ -172,13 +170,16 @@ class ProsumerAgent:
         forecast_prices = obs["price_forecast"]
 
         new_schedule = self.schedule
-        x0 = new_schedule[timestep:timestep + FORECAST_HORIZON]
+        x0 = new_schedule[timestep : timestep + FORECAST_HORIZON]
         size = len(x0)
 
         if size == FORECAST_HORIZON and timestep > 0:
             # if obs["agent_state"][0] < 0:
-            self.total_energy = (self.total_energy + self.schedule[timestep + FORECAST_HORIZON - 1]
-                                 - self.schedule[timestep - 1])
+            self.total_energy = (
+                self.total_energy
+                + self.schedule[timestep + FORECAST_HORIZON - 1]
+                - self.schedule[timestep - 1]
+            )
             # else:
             #     self.total_energy = (self.total_energy + self.schedule[timestep + FORECAST_HORIZON - 1]
             #                          - obs["agent_state"][0])
@@ -190,27 +191,35 @@ class ProsumerAgent:
             #     self.total_energy = self.total_energy - obs["agent_state"][0]
             #     self.schedule[timestep-1] = obs["agent_state"][0]
 
-        buy_prices = np.append(
-            forecast_prices, forecast_prices[-1]
-        )
+        buy_prices = np.append(forecast_prices, forecast_prices[-1])
 
-        buy_prices = [buy_prices[h] if buy_prices[h] > 0 else buy_prices[h - 1] for
-                      h in range(size)]
+        buy_prices = [
+            buy_prices[h] if buy_prices[h] > 0 else buy_prices[h - 1]
+            for h in range(size)
+        ]
 
         def objective(x: list) -> float:
             return sum(
-                i[0] * (i[1] + obs["agent_state"][1]) if i[0] >= 0 else i[0] * -(i[1] - obs["agent_state"][2]) for i in
-                zip(x, buy_prices))
+                i[0] * (i[1] + obs["agent_state"][1])
+                if i[0] >= 0
+                else i[0] * -(i[1] - obs["agent_state"][2])
+                for i in zip(x, buy_prices)
+            )
 
         bnds = [(0, action_space.high[0, 1]) for i in range(size)]
         cons = {"type": "eq", "fun": lambda x: sum(x) - self.total_energy}
         sol = sc.minimize(objective, x0, bounds=bnds, constraints=cons)
 
-        new_schedule = np.concatenate((new_schedule[:timestep], sol.get("x"), new_schedule[timestep + size:]))
+        new_schedule = np.concatenate(
+            (new_schedule[:timestep], sol.get("x"), new_schedule[timestep + size :])
+        )
 
         a = 0.05
         # y = [self.schedule[i] - sol.get("x")[i] for i in range(FORECAST_HORIZON)]
-        new_schedule[timestep:] = a * np.array(new_schedule)[timestep:] + (1 - a) * np.array(self.schedule)[timestep:]
+        new_schedule[timestep:] = (
+            a * np.array(new_schedule)[timestep:]
+            + (1 - a) * np.array(self.schedule)[timestep:]
+        )
         z = [val - new_schedule[i] for i, val in enumerate(self.schedule)]
         self.schedule = new_schedule
 
