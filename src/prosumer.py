@@ -22,10 +22,11 @@ def load_data(csv_path: str):
     df = pd.read_csv(csv_path)
     p_col = "Price (EUR/MWhe)"
 
-
     days = {}
     for d, sub in df.groupby("Day"):
-        sub = sub.sort_values("Hour_of_Day")[["Hour_of_Day", p_col]].reset_index(drop=True)
+        sub = sub.sort_values("Hour_of_Day")[["Hour_of_Day", p_col]].reset_index(
+            drop=True
+        )
         if len(sub) != 24:
             print(
                 f"Warning: day {d} has {len(sub)} rows (expected 24). Using what's available."
@@ -52,6 +53,8 @@ class ProsumerAgent:
         generation_capacity: float,
         marginal_price: float,
         generation_type: str = "solar",
+        buy_tariff=0.1,
+        sell_tariff=0.1,
     ):
         self.agent_id = agent_id
         self.load = load  # energy demand must be met entirely or not. can move according to the lambda in the job
@@ -75,6 +78,8 @@ class ProsumerAgent:
             self.generation_capacity / self.solar_data.max(),
             self.generation_capacity / self.wind_data.max(),
         ]
+        self.buy_tariff = buy_tariff
+        self.sell_tariff = sell_tariff
         del df
         del generation_data_file
 
@@ -137,20 +142,37 @@ class ProsumerAgent:
         return initial_net_demand, actual_net_demand, supply
 
     def purchase_from_national_market(
-        self, qty_got: float, bid_price: float, bid_qty: float, timestep: int
+        self,
+        action: int,
+        qty_got: float,
+        bid_qty: float,
+        clearing_price: float,
+        timestep: int,
+        buy_tariff: float,
+        sell_tariff: float,
     ):
         t = timestep % 24
-        price = NATIONAL_MARKET_DATA.get("Day_4").iloc[t,1]/1000
-        qty = 0
-        if bid_qty > 0:
-            qty = qty_got - bid_qty
+        nation_market_price = NATIONAL_MARKET_DATA.get("Day_4").iloc[t, 1] / 1000
+        qty_excess = 0
+        assert bid_qty >= 0
+        qty_excess = bid_qty - qty_got
+        assert qty_excess >= 0
         # else:
         #     qty = bid_qty - qty_got
-
-        cost: float = price * qty
-        self.national_consumption[timestep] = qty
-        self.costs[timestep] += -cost
-        return -cost
+        cost = 0
+        # Selling
+        if action == 0:
+            cost += clearing_price * qty_got - sell_tariff * qty_got
+            cost += nation_market_price * qty_excess - sell_tariff * qty_excess
+        else:
+            cost += -(clearing_price * qty_got + buy_tariff * qty_got)
+            cost += -(nation_market_price * qty_excess + buy_tariff * qty_excess)
+        
+        # invert the sign 
+        cost*=-1
+        self.national_consumption[timestep] = qty_excess
+        self.costs[timestep] += cost
+        return cost
 
     def devise_strategy(
         self, obs: dict[str, np.ndarray], action_space: Box, timestep: int

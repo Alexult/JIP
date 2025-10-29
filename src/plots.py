@@ -90,7 +90,9 @@ def convert_json_agents_configs(json_agents):
 # --- Episode Runners ---
 
 
-def run_episode_wholesale(agent_configs, max_steps=MAX_STEPS):
+def run_episode_wholesale(
+    agent_configs, max_steps=MAX_STEPS, buy_tariff=0.1, sell_tariff=0.1
+):
     """
     Runs the WholesaleMarketEnv and returns its history for plotting.
     """
@@ -101,6 +103,8 @@ def run_episode_wholesale(agent_configs, max_steps=MAX_STEPS):
         agent_configs=configs_copy,
         wholesale_csv_path="./data/representative_wholesale_price_2025.csv",
         max_timesteps=max_steps,
+        buy_tariff=buy_tariff,
+        sell_tariff=sell_tariff,
     )
 
     logger.info(f"Starting Wholesale Market Episode ({max_steps} steps)")
@@ -142,13 +146,16 @@ def run_episode_wholesale(agent_configs, max_steps=MAX_STEPS):
     return {
         "prices": env.wholesale_prices_history,
         "cumulative_cost": env.cumulative_price_paid_history,
+        "price_paid_history": env.total_price_paid_history,
         "initial_net_demand": initial_net_demand,
         "actual_net_demand": actual_net_demand,
         "total_profit": total_system_profit,
     }
 
 
-def run_episode_flexibility(agent_configs, max_steps=MAX_STEPS):
+def run_episode_flexibility(
+    agent_configs, max_steps=MAX_STEPS, buy_tariff=0.1, sell_tariff=0.1
+):
     """
     Runs the FlexibilityMarketEnv and returns its history for plotting.
     """
@@ -160,8 +167,8 @@ def run_episode_flexibility(agent_configs, max_steps=MAX_STEPS):
         market_clearing_agent=DoubleAuctionClearingAgent(),
         discount=(1, 400),  # Using default discount from main.py
         max_timesteps=max_steps,
-        buy_tariff=0.1,
-        sell_tariff=0.1,
+        buy_tariff=buy_tariff,
+        sell_tariff=sell_tariff,
     )
 
     logger.info(f"Starting Flexibility Market Episode ({max_steps} steps)")
@@ -220,10 +227,11 @@ def run_episode_flexibility(agent_configs, max_steps=MAX_STEPS):
     return {
         "prices": env.clearing_prices,
         "cumulative_cost": env.cumulative_price_paid_history,
+        "price_paid_history": env.total_price_paid_history,
         "initial_net_demand": initial_net_demand,
         "actual_net_demand": actual_net_demand,
         "total_profit": total_system_profit,
-        "quantity": env.clearing_quantities
+        "quantity": env.clearing_quantities,
     }
 
 
@@ -262,6 +270,12 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     # Apply 10x scale
     fl_cum_cost = (
         np.array(fl_results["cumulative_cost"][:steps_ran]) * FLEXIBILITY_SCALE_FACTOR
+    )
+
+    wh_tot_cost = np.array(wh_results["price_paid_history"][:steps_ran])
+    fl_tot_cost = (
+        np.array(fl_results["price_paid_history"][:steps_ran])
+        * FLEXIBILITY_SCALE_FACTOR
     )
 
     # Demand Profiles (no scaling needed here as it's a quantity/MWh, not a price/cost)
@@ -330,6 +344,16 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
         linestyle="-",
         linewidth=2,
     )
+    plt.plot(
+        timesteps,
+        fl_tot_cost,
+        label="LEM total cost per timestep",
+        color="green",
+        linestyle="-",
+        linewidth=2,
+    )
+    tot = np.sum(fl_tot_cost)
+    logger.debug(f"\n\n tot:{tot}, last:{fl_cum_cost[-1]}")
     plt.title("Cumulative System Cost Comparison (Buyers Only)")
     plt.xlabel("Timestep (Hour)")
     plt.ylabel("Cumulative Cost (€)")
@@ -454,7 +478,7 @@ def main():
     else:
         # Default behavior
         logger.info("Defaulting to generating 50 agents (seed 42).")
-        agents_JSON = generate_agents(n=50, seed=42)
+        agents_JSON = generate_agents(n=10, seed=42)
         save_agents_to_json(agents_JSON, "agents_50.json")
 
     # --- 2. Run Simulations ---

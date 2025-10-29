@@ -85,12 +85,14 @@ def convert_json_agents_configs(json_agents):
     return configs
 
 
-def run_episode(agent_configs, max_steps=MAX_STEPS):
+def run_episode(agent_configs, max_steps=MAX_STEPS, buy_tariff=0.1, sell_tariff=0.1):
     # --- MODIFIED ENV CREATION ---
     env = WholesaleMarketEnv(
         agent_configs=agent_configs,
         wholesale_csv_path="./data/representative_wholesale_price_2025.csv",
         max_timesteps=max_steps,
+        buy_tariff=buy_tariff,
+        sell_tariff=sell_tariff,
     )
     # --- END MODIFICATION ---
 

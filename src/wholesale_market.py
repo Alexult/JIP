@@ -26,11 +26,14 @@ class WholesaleMarketEnv(Env):
     def __init__(
         self,
         agent_configs: list[dict[str, Any]],
+        buy_tariff: float,
+        sell_tariff: float,
         wholesale_csv_path: str = "./data/representative_wholesale_price_2025.csv",
         max_timesteps: int = 96,
     ):
         super().__init__()
-
+        self.buy_tariff = buy_tariff
+        self.sell_tariff = sell_tariff
         self.n_agents = len(agent_configs)
         self.agent_ids = list(range(self.n_agents))
         self.max_timesteps = max_timesteps
@@ -49,7 +52,9 @@ class WholesaleMarketEnv(Env):
 
             days = {}
             for d, sub in df.groupby("Day"):
-                sub = sub.sort_values("Hour_of_Day")[["Hour_of_Day", p_col]].reset_index(drop=True)
+                sub = sub.sort_values("Hour_of_Day")[
+                    ["Hour_of_Day", p_col]
+                ].reset_index(drop=True)
                 if len(sub) != 24:
                     print(
                         f"Warning: day {d} has {len(sub)} rows (expected 24). Using what's available."
@@ -256,8 +261,8 @@ class WholesaleMarketEnv(Env):
             # In wholesale market, agent trades their net demand/surplus at wholesale price
             if net_demand > 0:
                 # Agent needs energy (buying)
-                trade_value = (
-                    -net_demand * self.current_wholesale_price
+                trade_value = -net_demand * (
+                    self.current_wholesale_price + self.buy_tariff
                 )  # Negative (cost)
                 action_type = "buy"
                 self.last_agent_trades[agent.agent_id] = (
@@ -265,8 +270,8 @@ class WholesaleMarketEnv(Env):
                 )
             elif net_demand < 0:
                 # Agent has surplus energy (selling)
-                trade_value = (
-                    -net_demand * self.current_wholesale_price
+                trade_value = -net_demand * (
+                    self.current_wholesale_price - self.sell_tariff
                 )  # Positive (revenue)
                 action_type = "sell"
                 self.last_agent_trades[agent.agent_id] = net_demand  # Negative for sold
@@ -388,6 +393,7 @@ class WholesaleMarketEnv(Env):
         # Calculate total price paid by *buyers only*
         total_price_paid_t = 0
         for trade in trades:
+            logger.debug(f"trade: {trade}")
             if trade["action_type"] == "buy":
                 total_price_paid_t += -trade[
                     "trade_value"

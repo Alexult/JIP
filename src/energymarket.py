@@ -454,36 +454,49 @@ class DoubleAuctionEnv(Env):
                 actual_consumption += float(qty)
 
         # total price paid by buyers this timestep
-        total_price_paid = float(clearing_price) * actual_consumption
-
+        # total_price_paid = float(clearing_price) * actual_consumption
+        total_price_paid=0
 
         reward = self._calculate_rewards(clearing_price, cleared_participants)
 
         price_forecast = self._forecast_prices(actions)
 
         # --- Update last cleared quantities for the next observation ---
+        tmp = []
         self.last_cleared_quantities = {i: 0.0 for i in self.agent_ids}
         for agent_id, qty in cleared_participants:
             if agent_id in bids_agent_ids:
-                action = [x[1:] for x in bids_array if x[0] == agent_id][0]
+                # action = [x[1:] for x in bids_array if x[0] == agent_id][0]
+                action = 1
+                bid_qty = [b[2] for b in bids_array if b[0] == agent_id][0]
             else:
-                action = [[x[1], -x[2]] for x in offers_array if x[0] == agent_id][0]
-            self.last_cleared_quantities[agent_id] = qty
-            total_price_paid += self.agents[agent_id].purchase_from_national_market(
-                qty, action[0], action[1], self.current_timestep
-            )
+                action = 0
+                bid_qty = [b[2] for b in offers_array if b[0] == agent_id][0]
 
+            self.last_cleared_quantities[agent_id] = qty
+            p = self.agents[agent_id].purchase_from_national_market(
+                action=action,
+                qty_got=qty,
+                bid_qty=bid_qty,
+                timestep=self.current_timestep,
+                clearing_price=clearing_price,
+                buy_tariff=self.buy_tariff,
+                sell_tariff=self.sell_tariff,
+            )
+            total_price_paid +=p
+            tmp.append(p)
+
+        logger.debug(f"price_paid: {tmp}")
         # append into history arrays (cumulative computed and stored)
         self.preferred_consumption_history.append(preferred_consumption)
         self.actual_consumption_history.append(actual_consumption)
         self.total_price_paid_history.append(total_price_paid)
         cumulative = (
-                         self.cumulative_price_paid_history[-1]
-                         if self.cumulative_price_paid_history
-                         else 0.0
-                     ) + total_price_paid
+            self.cumulative_price_paid_history[-1]
+            if self.cumulative_price_paid_history
+            else 0.0
+        ) + total_price_paid
         self.cumulative_price_paid_history.append(cumulative)
-        ############
 
         self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
