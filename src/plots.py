@@ -432,7 +432,7 @@ def main():
     else:
         # Default behavior
         logger.info("Defaulting to generating 50 agents (seed 42).")
-        agents_JSON = generate_agents(n=10, seed=42)
+        agents_JSON = generate_agents(n=50, seed=42)
         save_agents_to_json(agents_JSON, "agents_50.json")
 
     # --- 2. Run Simulations ---

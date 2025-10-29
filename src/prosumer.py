@@ -140,19 +140,17 @@ class ProsumerAgent:
         self, qty_got: float, bid_price: float, bid_qty: float, timestep: int
     ):
         t = timestep % 24
-        price = NATIONAL_MARKET_DATA.get("Day_1").iloc[t,1]
+        price = NATIONAL_MARKET_DATA.get("Day_1").iloc[t,1]/1000
         qty = 0
         if bid_qty > 0:
-            if bid_price >= price:
-                qty = qty_got - bid_qty
-        else:
-            if bid_price <= price:
-                qty = bid_qty - qty_got
+            qty = qty_got - bid_qty
+        # else:
+        #     qty = bid_qty - qty_got
 
         cost: float = price * qty
         self.national_consumption[timestep] = qty
         self.costs[timestep] += -cost
-        return cost
+        return -cost
 
     def devise_strategy(
         self, obs: dict[str, np.ndarray], action_space: Box, timestep: int

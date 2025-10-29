@@ -456,17 +456,6 @@ class DoubleAuctionEnv(Env):
         # total price paid by buyers this timestep
         total_price_paid = float(clearing_price) * actual_consumption
 
-        # append into history arrays (cumulative computed and stored)
-        self.preferred_consumption_history.append(preferred_consumption)
-        self.actual_consumption_history.append(actual_consumption)
-        self.total_price_paid_history.append(total_price_paid)
-        cumulative = (
-            self.cumulative_price_paid_history[-1]
-            if self.cumulative_price_paid_history
-            else 0.0
-        ) + total_price_paid
-        self.cumulative_price_paid_history.append(cumulative)
-        ############
 
         reward = self._calculate_rewards(clearing_price, cleared_participants)
 
@@ -480,9 +469,21 @@ class DoubleAuctionEnv(Env):
             else:
                 action = [[x[1], -x[2]] for x in offers_array if x[0] == agent_id][0]
             self.last_cleared_quantities[agent_id] = qty
-            self.agents[agent_id].purchase_from_national_market(
+            total_price_paid += self.agents[agent_id].purchase_from_national_market(
                 qty, action[0], action[1], self.current_timestep
             )
+
+        # append into history arrays (cumulative computed and stored)
+        self.preferred_consumption_history.append(preferred_consumption)
+        self.actual_consumption_history.append(actual_consumption)
+        self.total_price_paid_history.append(total_price_paid)
+        cumulative = (
+                         self.cumulative_price_paid_history[-1]
+                         if self.cumulative_price_paid_history
+                         else 0.0
+                     ) + total_price_paid
+        self.cumulative_price_paid_history.append(cumulative)
+        ############
 
         self.last_clearing_price = clearing_price
         self.last_clearing_quantity = clearing_quantity
