@@ -15,7 +15,7 @@ from energymarket import (
 from loguru import logger
 
 # Use a consistent number of steps for comparison
-MAX_STEPS = 24
+MAX_STEPS = 50
 GENERATION_TYPES = ["solar", "wind", "none"]
 
 
@@ -28,7 +28,7 @@ def generate_agents(n=100, seed=42):
     agents = []
     for i in range(n):
         load = generate_load()
-        generation_capacity = random.randint(60, 100)
+        generation_capacity = random.randint(150, 200)
         generation_type = random.choice(GENERATION_TYPES)
         agents.append(
             {
@@ -158,7 +158,7 @@ def run_episode_flexibility(agent_configs, max_steps=MAX_STEPS):
     env = FlexibilityMarketEnv(
         agent_configs=configs_copy,
         market_clearing_agent=DoubleAuctionClearingAgent(),
-        discount=(1, 1000),  # Using default discount from main.py
+        discount=(1, 400),  # Using default discount from main.py
         max_timesteps=max_steps,
         buy_tariff=0.1,
         sell_tariff=0.1,
@@ -198,6 +198,8 @@ def run_episode_flexibility(agent_configs, max_steps=MAX_STEPS):
         f"Flexibility Episode Finished. Total System Profit/Loss: €{total_system_profit:.2f}"
     )
 
+    env.plot_bid_ask_curves(4)
+
     # Manually calculate demand profiles
     # T = env.current_timestep
     # initial_net_demand_total = np.zeros(T)
@@ -221,6 +223,7 @@ def run_episode_flexibility(agent_configs, max_steps=MAX_STEPS):
         "initial_net_demand": initial_net_demand,
         "actual_net_demand": actual_net_demand,
         "total_profit": total_system_profit,
+        "quantity": env.clearing_quantities
     }
 
 
@@ -243,7 +246,7 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
         logger.error("No data to plot. Both simulations might have failed.")
         return
 
-    timesteps = range(1, steps_ran + 1)
+    timesteps = range(steps_ran)
 
     # --- Data Preparation with Scaling ---
 
@@ -251,6 +254,8 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     wh_prices = np.array(wh_results["prices"][:steps_ran])
     # Apply 10x scale
     fl_prices = np.array(fl_results["prices"][:steps_ran]) * FLEXIBILITY_SCALE_FACTOR
+
+    fl_quantity = np.array(fl_results["quantity"][:steps_ran])
 
     # Cumulative Cost
     wh_cum_cost = np.array(wh_results["cumulative_cost"][:steps_ran])
@@ -266,28 +271,45 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
 
     # --- Plot 1: Price Comparison ---
     plt.figure(figsize=(12, 6))
-    plt.plot(
-        timesteps,
-        wh_prices,
-        label="Wholesale Price",
-        color="orange",
-        linestyle="--",
-        alpha=0.9,
-    )
+    # plt.plot(
+    #     timesteps,
+    #     wh_prices,
+    #     label="Wholesale Price",
+    #     color="orange",
+    #     linestyle="--",
+    #     alpha=0.9,
+    # )
     plt.plot(
         timesteps,
         fl_prices,
-        label="Flexibility Market Price (Scaled 10x)",
+        label="Local Energy Market Price",
         color="blue",
         linestyle="-",
         alpha=0.9,
     )
-    plt.title("Market Price Comparison")
+    plt.title("LEM Price")
     plt.xlabel("Timestep (Hour)")
     plt.ylabel("Price (€/MWh)")
     plt.legend()
     plt.grid(True, linestyle=":", alpha=0.6)
     plt.savefig("market_price_comparison.png")
+    plt.close()
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(
+        timesteps,
+        fl_quantity,
+        label="Local Energy Market Clearing",
+        color="blue",
+        linestyle="-",
+        alpha=0.9,
+    )
+    plt.title("LEM Clearing Quantity")
+    plt.xlabel("Timestep (Hour)")
+    plt.ylabel("Quantity (MWh)")
+    plt.legend()
+    plt.grid(True, linestyle=":", alpha=0.6)
+    plt.savefig("clearing_quantity.png")
     plt.close()
 
     # --- Plot 2: Cumulative Cost Comparison (Buyers) ---
@@ -303,7 +325,7 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     plt.plot(
         timesteps,
         fl_cum_cost,
-        label="Flexibility Market (Total Buyer Cost, Scaled 10x)",
+        label="Local Energy Market (Total Buyer Cost)",
         color="blue",
         linestyle="-",
         linewidth=2,
@@ -337,7 +359,7 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     plt.plot(
         timesteps,
         fl_actual_nd,
-        label="Optimized Net Demand (Flexibility Market)",
+        label="Optimized Net Demand (Local Energy Market)",
         color="blue",
         linestyle="-",
         alpha=0.9,

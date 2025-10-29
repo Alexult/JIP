@@ -67,10 +67,10 @@ class ProsumerAgent:
         self.total_energy = sum(self.schedule[0:FORECAST_HORIZON])
         self.national_consumption = [0.0] * len(self.load)
 
-        generation_data_file = "./data/hourly_wind_solar_data.csv"
+        generation_data_file = "./data/hourly_wind_solar_data_day_4.csv"
         df = pd.read_csv(generation_data_file)
-        self.solar_data = df["Solar - Actual Aggregated [MW] (D)"].to_numpy()
-        self.wind_data = df["Wind Onshore - Actual Aggregated [MW] (D)"].to_numpy()
+        self.solar_data = df["Solar - Actual Aggregated [MW]"].to_numpy()
+        self.wind_data = df["Wind Onshore - Actual Aggregated [MW]"].to_numpy()
         self.multiplicative_factor = [
             self.generation_capacity / self.solar_data.max(),
             self.generation_capacity / self.wind_data.max(),
@@ -140,7 +140,7 @@ class ProsumerAgent:
         self, qty_got: float, bid_price: float, bid_qty: float, timestep: int
     ):
         t = timestep % 24
-        price = NATIONAL_MARKET_DATA.get("Day_1").iloc[t,1]/1000
+        price = NATIONAL_MARKET_DATA.get("Day_4").iloc[t,1]/1000
         qty = 0
         if bid_qty > 0:
             qty = qty_got - bid_qty
@@ -228,7 +228,7 @@ class ProsumerAgent:
 
             if nd > 0:  # needs to buy
                 base_price = buy_prices[h]
-                price = base_price * price_noise * ((1.01) ** (nd))
+                price = base_price * price_noise * ((1.005) ** (nd))
                 price = np.clip(price, action_space.low[h, 0], action_space.high[h, 0])
                 qty = np.clip(nd, action_space.low[h, 1], action_space.high[h, 1])
                 bids[h] = [price, qty]
