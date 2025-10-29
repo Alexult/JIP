@@ -38,15 +38,31 @@ class WholesaleMarketEnv(Env):
 
         # Load wholesale prices from CSV
         try:
-            self.wholesale_df = pd.read_csv(wholesale_csv_path)
-            self.wholesale_prices = self.wholesale_df["Price (EUR/MWhe)"].values
+            df = pd.read_csv(wholesale_csv_path)
+            ts_col = "Datetime (Local)"
+            p_col = "Price (EUR/MWhe)"
+
+            # Parse timestamps and split into days
+            # df[ts_col] = pd.to_datetime(df[ts_col])
+            # df["day"] = df[ts_col].dt.date
+            # df["hour"] = df[ts_col].dt.hour
+
+            days = {}
+            for d, sub in df.groupby("Day"):
+                sub = sub.sort_values("Hour_of_Day")[["Hour_of_Day", p_col]].reset_index(drop=True)
+                if len(sub) != 24:
+                    print(
+                        f"Warning: day {d} has {len(sub)} rows (expected 24). Using what's available."
+                    )
+                days[str(d)] = sub
+            self.wholesale_prices = days.get("Day_1").iloc[:, 1].to_list()
         except FileNotFoundError:
             logger.error(f"Wholesale price file not found: {wholesale_csv_path}")
             logger.warning("Using default placeholder prices.")
             self.wholesale_prices = np.array(
                 [50.0 + 10 * np.sin(i / 4) for i in range(max(max_timesteps, 1000))]
             )
-        self.FORECAST_HORIZON = 24
+        self.FORECAST_HORIZON = 10
 
         # Public Market Stats
         self.current_wholesale_price = (

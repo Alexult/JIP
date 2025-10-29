@@ -13,24 +13,19 @@ PRICE_CSV_PATH = os.path.join(
     os.path.dirname(__file__),
     "..",
     "data",
-    "representative_days_wholesale_price_2025.csv",
+    "representative_wholesale_price_2025.csv",
 )
 
 
 def load_data(csv_path: str):
     """Return dict {day_str: DataFrame(hour, price)} for each calendar day in file."""
     df = pd.read_csv(csv_path)
-    ts_col = "Datetime (Local)"
     p_col = "Price (EUR/MWhe)"
 
-    # Parse timestamps and split into days
-    df[ts_col] = pd.to_datetime(df[ts_col])
-    df["day"] = df[ts_col].dt.date
-    df["hour"] = df[ts_col].dt.hour
 
     days = {}
-    for d, sub in df.groupby("day"):
-        sub = sub.sort_values("hour")[["hour", p_col]].reset_index(drop=True)
+    for d, sub in df.groupby("Day"):
+        sub = sub.sort_values("Hour_of_Day")[["Hour_of_Day", p_col]].reset_index(drop=True)
         if len(sub) != 24:
             print(
                 f"Warning: day {d} has {len(sub)} rows (expected 24). Using what's available."
@@ -145,8 +140,7 @@ class ProsumerAgent:
         self, qty_got: float, bid_price: float, bid_qty: float, timestep: int
     ):
         t = timestep % 24
-        day = next(iter(NATIONAL_MARKET_DATA.items()))[1]
-        price = day.iloc[t, 1]
+        price = NATIONAL_MARKET_DATA.get("Day_1").iloc[t,1]
         qty = 0
         if bid_qty > 0:
             if bid_price >= price:
@@ -214,7 +208,7 @@ class ProsumerAgent:
             (new_schedule[:timestep], sol.get("x"), new_schedule[timestep + size :])
         )
 
-        a = 0.05
+        a = 0.03
         # y = [self.schedule[i] - sol.get("x")[i] for i in range(FORECAST_HORIZON)]
         new_schedule[timestep:] = (
             a * np.array(new_schedule)[timestep:]

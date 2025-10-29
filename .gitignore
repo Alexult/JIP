@@ -217,3 +217,7 @@ __marimo__/
 .direnv/
 /agents_100.json
 /data/
+
+*.png
+
+*.json
