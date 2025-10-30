@@ -17,6 +17,7 @@ from loguru import logger
 # Use a consistent number of steps for comparison
 MAX_STEPS = 50
 GENERATION_TYPES = ["solar", "wind", "none"]
+FLEXIBILITY_SCALE_FACTOR = 1000
 
 
 # --- Agent Generation Functions (for consistency) ---
@@ -246,7 +247,6 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     logger.info("Generating comparison plots...")
 
     # Define the scaling factor for flexibility market results
-    FLEXIBILITY_SCALE_FACTOR = 1000
 
     # Ensure data lengths match for plotting
     steps_ran = min(len(wh_results["prices"]), len(fl_results["prices"]))
@@ -344,14 +344,14 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
         linestyle="-",
         linewidth=2,
     )
-    plt.plot(
-        timesteps,
-        fl_tot_cost,
-        label="LEM total cost per timestep",
-        color="green",
-        linestyle="-",
-        linewidth=2,
-    )
+    # plt.plot(
+    #     timesteps,
+    #     fl_tot_cost,
+    #     label="LEM total cost per timestep",
+    #     color="green",
+    #     linestyle="-",
+    #     linewidth=2,
+    # )
     tot = np.sum(fl_tot_cost)
     logger.debug(f"\n\n tot:{tot}, last:{fl_cum_cost[-1]}")
     plt.title("Cumulative System Cost Comparison (Buyers Only)")
@@ -478,19 +478,27 @@ def main():
     else:
         # Default behavior
         logger.info("Defaulting to generating 50 agents (seed 42).")
-        agents_JSON = generate_agents(n=10, seed=42)
+        agents_JSON = generate_agents(n=50, seed=42)
         save_agents_to_json(agents_JSON, "agents_50.json")
 
     # --- 2. Run Simulations ---
 
     # Run Wholesale
+    buy_tariff = 0.15
+    sell_tariff = 0.12
     wholesale_results = run_episode_wholesale(
-        agent_configs=agents_JSON, max_steps=args.steps
+        agent_configs=agents_JSON,
+        max_steps=args.steps,
+        buy_tariff=buy_tariff * FLEXIBILITY_SCALE_FACTOR,
+        sell_tariff=sell_tariff * FLEXIBILITY_SCALE_FACTOR,
     )
 
     # Run Flexibility
     flexibility_results = run_episode_flexibility(
-        agent_configs=agents_JSON, max_steps=args.steps
+        agent_configs=agents_JSON,
+        max_steps=args.steps,
+        buy_tariff=buy_tariff,
+        sell_tariff=sell_tariff,
     )
 
     # --- 3. Plot Comparison ---
