@@ -393,11 +393,9 @@ class WholesaleMarketEnv(Env):
         # Calculate total price paid by *buyers only*
         total_price_paid_t = 0
         for trade in trades:
-            logger.debug(f"trade: {trade}")
-            if trade["action_type"] == "buy":
-                total_price_paid_t += -trade[
-                    "trade_value"
-                ]  # trade_value is negative for cost
+            total_price_paid_t += -trade[
+                "trade_value"
+            ]  # trade_value is negative for cost
 
         self.total_price_paid_history.append(total_price_paid_t)
 
