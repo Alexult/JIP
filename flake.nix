@@ -31,6 +31,7 @@
             ipykernel
             scipy
             gprof2dot
+            seaborn
           ] ++ [pkgs.graphviz];
         };
       };
