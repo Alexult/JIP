@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 # --- MODIFIED IMPORT ---
 from wholesale_market import WholesaleMarketEnv
+
 # from energymarket import (
 #     DoubleAuctionEnv,
 #     DoubleAuctionClearingAgent,
@@ -15,7 +16,7 @@ from wholesale_market import WholesaleMarketEnv
 # )
 from loguru import logger
 
-MAX_STEPS = 96 # Increased to 4 days for a better plot
+MAX_STEPS = 96  # Increased to 4 days for a better plot
 GENERATION_TYPES = ["solar", "wind", "none"]
 
 
@@ -28,14 +29,16 @@ def generate_agents(n=100, seed=42):
         load = generate_load()
         generation_capacity = random.randint(0, 100)
         generation_type = random.choice(GENERATION_TYPES)
-        agents.append({
-            "id": i,
-            "load": load,
-            "generation_capacity": generation_capacity,
-            "generation_type": generation_type,
-            # This marginal_price is used by ProsumerAgent for selling
-            "marginal_price": random.uniform(0.05, 0.15), # e.g., 50-150 EUR/MWh
-        })
+        agents.append(
+            {
+                "id": i,
+                "load": load,
+                "generation_capacity": generation_capacity,
+                "generation_type": generation_type,
+                # This marginal_price is used by ProsumerAgent for selling
+                "marginal_price": random.uniform(0.05, 0.15),  # e.g., 50-150 EUR/MWh
+            }
+        )
     return agents
 
 
@@ -43,8 +46,11 @@ def generate_load():
     noise = perlin_noise.PerlinNoise(octaves=2, seed=random.randint(0, 1000))
     # Generate load for more than just 24 steps
     scale = random.uniform(20, 80)
-    y = [scale * (noise(i * 0.05) * 0.5 + 0.6) + random.uniform(-5, 5) for i in range(MAX_STEPS * 2)]
-    return [max(0, val) for val in y] # Ensure no negative load
+    y = [
+        scale * (noise(i * 0.05) * 0.5 + 0.6) + random.uniform(-5, 5)
+        for i in range(MAX_STEPS * 2)
+    ]
+    return [max(0, val) for val in y]  # Ensure no negative load
 
 
 # Save agents to JSON
@@ -79,13 +85,14 @@ def convert_json_agents_configs(json_agents):
     return configs
 
 
-def run_episode(agent_configs, max_steps=MAX_STEPS):
-    
+def run_episode(agent_configs, max_steps=MAX_STEPS, buy_tariff=0.1, sell_tariff=0.1):
     # --- MODIFIED ENV CREATION ---
     env = WholesaleMarketEnv(
         agent_configs=agent_configs,
         wholesale_csv_path="./data/representative_wholesale_price_2025.csv",
         max_timesteps=max_steps,
+        buy_tariff=buy_tariff,
+        sell_tariff=sell_tariff,
     )
     # --- END MODIFICATION ---
 
@@ -93,16 +100,15 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
     observations, info = env.reset()
     all_terminated = {i: False for i in env.agent_ids}
     all_truncated = {i: False for i in env.agent_ids}
-    
+
     # Use a dict to track total rewards per agent
     total_agent_rewards = {i: 0.0 for i in env.agent_ids}
-    
+
     t = 0
     while not all(all_terminated.values()) and not all(all_truncated.values()):
-        
         # The 'time_step' passed to devise_strategy tells the agent
         # which index of its load profile to use as t=0
-        time_step = t 
+        time_step = t
 
         actions = {}
         for agent_id in env.agent_ids:
@@ -114,16 +120,16 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
                 actions[agent_id] = env.agents[agent_id].devise_strategy(
                     obs_i, env.action_space, time_step
                 )
-            
+
         # The env's step function will read the agent's updated state
         observations, rewards, all_terminated, all_truncated, info = env.step(actions)
-        
+
         for agent_id, reward in rewards.items():
             total_agent_rewards[agent_id] += reward
-            
+
         env.render()
         t += 1
-        
+
         # Check for 'all' manually
         if all(all_terminated.values()) or all(all_truncated.values()):
             break
@@ -131,7 +137,7 @@ def run_episode(agent_configs, max_steps=MAX_STEPS):
     total_system_profit = sum(total_agent_rewards.values())
     print(f"\n--- Episode Finished ---")
     print(f"Total System Profit/Loss (All Agents): €{total_system_profit:.2f}")
-    
+
     # Plot final results
     env.plot_results()
     env.plot_price_change_for_single_day(day=0)
@@ -192,7 +198,9 @@ def main():
         agents_JSON = load_agents_from_json(path)
     else:
         # Default behavior: generate 50 agents
-        logger.info("No --generate or --load-from-file flag set. Defaulting to generating 50 agents.")
+        logger.info(
+            "No --generate or --load-from-file flag set. Defaulting to generating 50 agents."
+        )
         agents_JSON = generate_agents(n=50, seed=42)
         save_agents_to_json(agents_JSON, "agents_50.json")
 
