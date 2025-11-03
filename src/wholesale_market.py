@@ -60,7 +60,7 @@ class WholesaleMarketEnv(Env):
                         f"Warning: day {d} has {len(sub)} rows (expected 24). Using what's available."
                     )
                 days[str(d)] = sub
-            self.wholesale_prices = days.get("Day_4").iloc[:, 1].to_list()
+            self.wholesale_prices = days.get("Day_1").iloc[:, 1].to_list()
         except FileNotFoundError:
             logger.error(f"Wholesale price file not found: {wholesale_csv_path}")
             logger.warning("Using default placeholder prices.")

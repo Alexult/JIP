@@ -70,7 +70,7 @@ class ProsumerAgent:
         self.total_energy = sum(self.schedule[0:FORECAST_HORIZON])
         self.national_consumption = [0.0] * len(self.load)
 
-        generation_data_file = "./data/hourly_wind_solar_data_day_4.csv"
+        generation_data_file = "./data/hourly_wind_solar_data_day_1.csv"
         df = pd.read_csv(generation_data_file)
         self.solar_data = df["Solar - Actual Aggregated [MW]"].to_numpy()
         self.wind_data = df["Wind Onshore - Actual Aggregated [MW]"].to_numpy()
@@ -152,7 +152,7 @@ class ProsumerAgent:
         sell_tariff: float,
     ):
         t = timestep % 24
-        nation_market_price = NATIONAL_MARKET_DATA.get("Day_4").iloc[t, 1] / 1000
+        nation_market_price = NATIONAL_MARKET_DATA.get("Day_1").iloc[t, 1] / 1000
         qty_excess = 0
         assert bid_qty >= 0
         qty_excess = bid_qty - qty_got

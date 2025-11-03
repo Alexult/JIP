@@ -331,7 +331,7 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     plt.plot(
         timesteps,
         wh_cum_cost,
-        label="Wholesale Market (Total Buyer Cost)",
+        label="Wholesale Market (Total Cost)",
         color="orange",
         linestyle="--",
         linewidth=2,
@@ -339,7 +339,7 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     plt.plot(
         timesteps,
         fl_cum_cost,
-        label="Local Energy Market (Total Buyer Cost)",
+        label="Local Energy Market (Total Cost)",
         color="blue",
         linestyle="-",
         linewidth=2,
@@ -354,7 +354,7 @@ def plot_comparison_results(wh_results: dict, fl_results: dict):
     # )
     tot = np.sum(fl_tot_cost)
     logger.debug(f"\n\n tot:{tot}, last:{fl_cum_cost[-1]}")
-    plt.title("Cumulative System Cost Comparison (Buyers Only)")
+    plt.title("Cumulative System Cost Comparison")
     plt.xlabel("Timestep (Hour)")
     plt.ylabel("Cumulative Cost (€)")
     plt.legend()
