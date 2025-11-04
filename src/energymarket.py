@@ -101,7 +101,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
         if clearing_quantity == 0:
             return 0.0, 0.0, []
 
-        # STEP 3: Find the intersection price.
+        # Find the intersection price.
         # The price is set by the marginal traders (the last buyer and seller
         # needed to fulfill the clearing_quantity).
         try:
@@ -115,7 +115,7 @@ class DoubleAuctionClearingAgent(MarketClearingAgent):
             marginal_offer_idx = np.where(offers_cum_q >= clearing_quantity)[0][0]
             marginal_offer_price = offer_prices[marginal_offer_idx]
 
-            # The clearing price is the midpoint (a common auction rule)
+            # The clearing price is the midpoint
             clearing_price = (marginal_bid_price + marginal_offer_price) / 2.0
         except IndexError:
             return 0.0, 0.0, []
@@ -483,8 +483,9 @@ class DoubleAuctionEnv(Env):
                 buy_tariff=self.buy_tariff,
                 sell_tariff=self.sell_tariff,
             )
-            total_price_paid +=p
-            tmp.append(p)
+            if action ==0:
+                total_price_paid +=p
+                tmp.append(p)
 
         logger.debug(f"price_paid: {tmp}")
         # append into history arrays (cumulative computed and stored)
